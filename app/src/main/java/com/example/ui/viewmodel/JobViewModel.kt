@@ -200,6 +200,32 @@ class JobViewModel(private val repository: JobRepository) : ViewModel() {
         }
     }
 
+    /**
+     * Updates an applied job log's details (e.g. status tracking).
+     */
+    fun updateAppliedLog(log: AppliedJobLog) {
+        viewModelScope.launch {
+            try {
+                repository.updateAppliedLog(log)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error updating applied log: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Deletes an applied job log by ID.
+     */
+    fun deleteAppliedLog(id: Int) {
+        viewModelScope.launch {
+            try {
+                repository.deleteAppliedLogById(id)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error deleting applied log: ${e.message}")
+            }
+        }
+    }
+
     // Match calculation in-progress trackers
     private val _matchCalculationLoading = MutableStateFlow<Map<Int, Boolean>>(emptyMap())
     val matchCalculationLoading: StateFlow<Map<Int, Boolean>> = _matchCalculationLoading.asStateFlow()

@@ -51,6 +51,12 @@ interface AppliedLogDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertAppliedLog(log: AppliedJobLog): Long
 
+    @Update
+    suspend fun updateAppliedLog(log: AppliedJobLog)
+
+    @Query("DELETE FROM applied_job_logs WHERE id = :id")
+    suspend fun deleteAppliedLogById(id: Int)
+
     @Query("SELECT EXISTS(SELECT 1 FROM applied_job_logs WHERE UPPER(jobName) = UPPER(:jobName) AND UPPER(companyName) = UPPER(:companyName))")
     suspend fun isAlreadyApplied(jobName: String, companyName: String): Boolean
 }

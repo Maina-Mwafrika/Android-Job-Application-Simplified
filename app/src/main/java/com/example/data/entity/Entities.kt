@@ -29,7 +29,8 @@ data class ScrapedJob(
     val appliedAt: Long? = null,
     val chatHistoryJson: String? = null,
     val matchScore: Int? = null,
-    val matchFeedback: String? = null
+    val matchFeedback: String? = null,
+    val industry: String = "Other / General"
 )
 
 @Entity(
@@ -43,5 +44,6 @@ data class AppliedJobLog(
     val appliedAt: Long,
     val deadline: String,
     val customizedCv: String? = null,
-    val customizedCoverLetter: String? = null
+    val customizedCoverLetter: String? = null,
+    val status: String = "Applied" // "Applied", "Interviewing", "Hired", "Rejected"
 )

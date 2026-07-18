@@ -830,31 +830,45 @@ fun CvProfileScreen(viewModel: JobViewModel) {
 }
 
 fun getJobIndustry(job: ScrapedJob): String {
+    val validIndustries = listOf(
+        "Technology & IT",
+        "Finance & Banking",
+        "Healthcare & Biotech",
+        "Education & Academia",
+        "Marketing & Sales",
+        "Engineering & Construction"
+    )
+    val dbIndustry = job.industry.trim()
+    if (dbIndustry.isNotEmpty() && validIndustries.any { it.equals(dbIndustry, ignoreCase = true) }) {
+        return validIndustries.first { it.equals(dbIndustry, ignoreCase = true) }
+    }
+
     val text = "${job.title} ${job.description}".lowercase()
     return when {
-        text.contains("software") || text.contains("developer") || text.contains("engineer") || 
-        text.contains("tech") || text.contains("data") || text.contains("it") || 
-        text.contains("programmer") || text.contains("computer") || text.contains("code") -> "Technology & IT"
+        text.contains("nurse") || text.contains("doctor") || text.contains("health") || 
+        text.contains("clinical") || text.contains("biotech") || text.contains("medical") || 
+        text.contains("patient") || text.contains("medicine") || text.contains("hospital") -> "Healthcare & Biotech"
+        
+        text.contains("teacher") || text.contains("professor") || text.contains("education") || 
+        text.contains("school") || text.contains("academic") || text.contains("learning") || 
+        text.contains("classroom") || text.contains("university") || text.contains("tutor") -> "Education & Academia"
         
         text.contains("bank") || text.contains("finance") || text.contains("account") || 
         text.contains("audit") || text.contains("investment") || text.contains("tax") || 
-        text.contains("ledger") || text.contains("financial") -> "Finance & Banking"
-        
-        text.contains("nurse") || text.contains("doctor") || text.contains("health") || 
-        text.contains("clinical") || text.contains("biotech") || text.contains("medical") || 
-        text.contains("patient") || text.contains("medicine") -> "Healthcare & Biotech"
-        
-        text.contains("teacher") || text.contains("professor") || text.contains("education") || 
-        text.contains("school") || text.contains("academic") || text.contains("train") || 
-        text.contains("learning") || text.contains("classroom") -> "Education & Academia"
+        text.contains("ledger") || text.contains("financial") || text.contains("treasury") -> "Finance & Banking"
         
         text.contains("marketing") || text.contains("sales") || text.contains("ads") || 
         text.contains("seo") || text.contains("social media") || text.contains("brand") || 
-        text.contains("retail") || text.contains("sell") -> "Marketing & Sales"
+        text.contains("retail") || text.contains("sell") || text.contains("advertising") -> "Marketing & Sales"
         
         text.contains("civil") || text.contains("mechanical") || text.contains("electrical") || 
         text.contains("construction") || text.contains("builder") || text.contains("architect") || 
-        text.contains("building") -> "Engineering & Construction"
+        text.contains("building") || text.contains("infrastructure") -> "Engineering & Construction"
+        
+        text.contains("software") || text.contains("developer") || text.contains("engineer") || 
+        text.contains("tech") || text.contains("data") || text.contains("it") || 
+        text.contains("programmer") || text.contains("computer") || text.contains("code") || 
+        text.contains("cybersecurity") || text.contains("network") || text.contains("cloud") -> "Technology & IT"
         
         else -> "Other / General"
     }
@@ -2364,7 +2378,7 @@ fun AppliedLogsScreen(viewModel: JobViewModel) {
                 contentPadding = PaddingValues(bottom = 20.dp)
             ) {
                 items(logs) { log ->
-                    AppliedLogCard(log = log)
+                    AppliedLogCard(log = log, viewModel = viewModel)
                 }
             }
         }
@@ -2372,9 +2386,10 @@ fun AppliedLogsScreen(viewModel: JobViewModel) {
 }
 
 @Composable
-fun AppliedLogCard(log: AppliedJobLog) {
+fun AppliedLogCard(log: AppliedJobLog, viewModel: JobViewModel) {
     val context = LocalContext.current
     var viewDetails by remember { mutableStateOf(false) }
+    var showEditLogDialog by remember { mutableStateOf(false) }
 
     val formattedDate = remember(log.appliedAt) {
         try {
@@ -2382,6 +2397,18 @@ fun AppliedLogCard(log: AppliedJobLog) {
             sdf.format(Date(log.appliedAt))
         } catch (e: Exception) {
             "Just now"
+        }
+    }
+
+    val statusColor = remember(log.status) {
+        when (log.status) {
+            "Applied" -> Color(0xFF1976D2)
+            "Technical Round" -> Color(0xFFE65100)
+            "HR Round" -> Color(0xFF7B1FA2)
+            "Final Interview" -> Color(0xFF0097A7)
+            "Hired" -> Color(0xFF388E3C)
+            "Rejected" -> Color(0xFFD32F2F)
+            else -> Color(0xFF757575)
         }
     }
 
@@ -2416,11 +2443,27 @@ fun AppliedLogCard(log: AppliedJobLog) {
                     )
                 }
 
-                Icon(
-                    imageVector = if (viewDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .background(statusColor.copy(alpha = 0.12f), shape = RoundedCornerShape(12.dp))
+                            .border(1.dp, statusColor.copy(alpha = 0.5f), shape = RoundedCornerShape(12.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = log.status,
+                            color = statusColor,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Icon(
+                        imageVector = if (viewDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -2449,7 +2492,114 @@ fun AppliedLogCard(log: AppliedJobLog) {
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Text("Archive Registry ID: LOG_00${log.id}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Progress Stage Tracker Header
+                    Text(
+                        text = "Update Application Progress Stage:",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Column of Stage selector chips
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            listOf("Applied", "Technical Round", "HR Round").forEach { stageName ->
+                                val isActive = log.status == stageName
+                                val activeColor = when (stageName) {
+                                    "Applied" -> Color(0xFF1976D2)
+                                    "Technical Round" -> Color(0xFFE65100)
+                                    "HR Round" -> Color(0xFF7B1FA2)
+                                    else -> Color(0xFF757575)
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (isActive) activeColor.copy(alpha = 0.15f) else Color.Transparent)
+                                        .border(
+                                            width = if (isActive) 1.5.dp else 1.dp,
+                                            color = if (isActive) activeColor else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                                            shape = RoundedCornerShape(12.dp)
+                                        )
+                                        .clickable {
+                                            if (log.status != stageName) {
+                                                viewModel.updateAppliedLog(log.copy(status = stageName))
+                                                Toast.makeText(context, "Status updated: $stageName", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = stageName,
+                                        fontSize = 10.sp,
+                                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isActive) activeColor else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            listOf("Final Interview", "Hired", "Rejected").forEach { stageName ->
+                                val isActive = log.status == stageName
+                                val activeColor = when (stageName) {
+                                    "Final Interview" -> Color(0xFF0097A7)
+                                    "Hired" -> Color(0xFF388E3C)
+                                    "Rejected" -> Color(0xFFD32F2F)
+                                    else -> Color(0xFF757575)
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (isActive) activeColor.copy(alpha = 0.15f) else Color.Transparent)
+                                        .border(
+                                            width = if (isActive) 1.5.dp else 1.dp,
+                                            color = if (isActive) activeColor else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                                            shape = RoundedCornerShape(12.dp)
+                                        )
+                                        .clickable {
+                                            if (log.status != stageName) {
+                                                viewModel.updateAppliedLog(log.copy(status = stageName))
+                                                Toast.makeText(context, "Status updated: $stageName", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        if (stageName == "Hired" && isActive) {
+                                            Text("🎉 ", fontSize = 10.sp)
+                                        }
+                                        Text(
+                                            text = stageName,
+                                            fontSize = 10.sp,
+                                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isActive) activeColor else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     if (!log.customizedCv.isNullOrEmpty() || !log.customizedCoverLetter.isNullOrEmpty()) {
                         Text(
@@ -2461,7 +2611,8 @@ fun AppliedLogCard(log: AppliedJobLog) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             if (!log.customizedCv.isNullOrEmpty()) {
                                 OutlinedButton(
@@ -2500,9 +2651,101 @@ fun AppliedLogCard(log: AppliedJobLog) {
                             }
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Row for Editing and Deleting log
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            onClick = { showEditLogDialog = true }
+                        ) {
+                            Icon(Icons.Default.Edit, null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Edit Log", fontSize = 12.sp)
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        TextButton(
+                            onClick = {
+                                viewModel.deleteAppliedLog(log.id)
+                                Toast.makeText(context, "Log deleted from history", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Icon(Icons.Default.Delete, null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Delete Log", fontSize = 12.sp)
+                        }
+                    }
                 }
             }
         }
+    }
+
+    // Edit Log Dialog
+    if (showEditLogDialog) {
+        var editRole by remember { mutableStateOf(log.jobName) }
+        var editComp by remember { mutableStateOf(log.companyName) }
+        var editDead by remember { mutableStateOf(log.deadline) }
+
+        AlertDialog(
+            onDismissRequest = { showEditLogDialog = false },
+            title = { Text("Edit Applied Log Details", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedTextField(
+                        value = editRole,
+                        onValueChange = { editRole = it },
+                        label = { Text("Role / Job Title") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = editComp,
+                        onValueChange = { editComp = it },
+                        label = { Text("Company") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = editDead,
+                        onValueChange = { editDead = it },
+                        label = { Text("Deadline (YYYY-MM-DD)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val updated = log.copy(
+                            jobName = editRole.trim(),
+                            companyName = editComp.trim(),
+                            deadline = editDead.trim()
+                        )
+                        viewModel.updateAppliedLog(updated)
+                        showEditLogDialog = false
+                        Toast.makeText(context, "Log entry updated!", Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditLogDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 

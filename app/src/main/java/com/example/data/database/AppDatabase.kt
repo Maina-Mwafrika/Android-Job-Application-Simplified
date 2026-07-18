@@ -10,7 +10,7 @@ import com.example.data.entity.UserCv
 
 @Database(
     entities = [UserCv::class, ScrapedJob::class, AppliedJobLog::class],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
