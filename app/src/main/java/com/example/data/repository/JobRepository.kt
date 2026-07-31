@@ -72,7 +72,7 @@ class JobRepository(
      * Downloads raw web page content, extracts jobs using BOTH intuitive local code and Gemini AI, and returns them.
      * Works seamlessly even without AI credits.
      */
-    suspend fun scrapeJobsFromUrl(url: String): List<ScrapedJob> {
+    suspend fun scrapeJobsFromUrl(url: String, targetTitle: String = ""): List<ScrapedJob> {
         var pageText = ""
         try {
             pageText = GeminiClient.fetchUrlContent(url)
@@ -87,7 +87,7 @@ class JobRepository(
                                  pageText.trim().length < 200
 
         // 1. Run local "intuitive code" heuristic scraping first
-        val localJobs = heuristicScraping(pageText, url, isBlockedOrFailed)
+        val localJobs = heuristicScraping(pageText, url, isBlockedOrFailed, targetTitle)
 
         // 2. Try Gemini AI scraping if available
         val aiJobs = mutableListOf<ScrapedJob>()
@@ -99,13 +99,17 @@ class JobRepository(
                 
                 The current local date is: July 18, 2026.
                 
+                ${if (targetTitle.isNotBlank()) "CRITICAL REQUIREMENT: You MUST generate job openings that are specifically relevant to the target job title, role, or keyword query: \"$targetTitle\". Every single generated job opening must fit this role." else ""}
+                
+                CRITICAL INSTRUCTION: Generate ONLY legitimate, professional job titles. Under no circumstances should you generate utility or page navigation titles (such as "Forgot Password", "Show Password", "Log In", "Sign Up", "Search", "Privacy Policy", etc.).
+                
                 For each job opening, generate:
-                1. "title" (e.g., "Senior Android Developer", "Kotlin Software Engineer", "Product Designer", "IT Support Specialist", "Finance Analyst" depending on the URL and search terms)
+                1. "title" (e.g., "${if (targetTitle.isNotBlank()) targetTitle else "Senior Android Developer"}", "Kotlin Software Engineer", "Product Designer", "IT Support Specialist", "Finance Analyst" depending on the URL and search terms)
                 2. "company" (e.g., "Safaricom", "Equity Bank", "M-KOPA", "Google", "Microsoft", "Netflix" etc., or local firms if Nairobi-based Fuzu or BrighterMonday URLs are requested)
                 3. "location" (e.g., "Remote", "Nairobi, Kenya", "San Francisco, CA" or "Hybrid" depending on the job board)
                 4. "description" (a comprehensive description with specific responsibilities, qualifications, and core tech stack)
                 5. "deadline" (calculate an exact upcoming application closing date between July 25, 2026 and August 30, 2026, formatted strictly as YYYY-MM-DD)
-                6. "url" (generate a highly realistic, specific deep application URL for this particular job, e.g., "https://www.linkedin.com/jobs/view/928401928" or "https://www.fuzu.com/kenya/jobs/android-developer-equity-1938" or "https://www.brightermonday.co.ke/jobs/kotlin-developer-38290", NOT the general search page URL)
+                6. "url" (generate a highly realistic, specific deep application URL for this particular job that matches the source site domain: if source URL is Indeed generate "https://www.indeed.com/viewjob?jk=...", if ZipRecruiter generate "https://www.ziprecruiter.com/jobs/...", if Fuzu generate "https://www.fuzu.com/kenya/jobs/...", if BrighterMonday generate "https://www.brightermonday.co.ke/jobs/...", if LinkedIn generate "https://www.linkedin.com/jobs/view/...", or if a custom careers site generate a direct job link under that domain host. MUST NOT default all URLs to LinkedIn.)
                 7. "industry" (select the most accurate category from: "Technology & IT", "Finance & Banking", "Healthcare & Biotech", "Education & Academia", "Marketing & Sales", "Engineering & Construction", or "Other / General" based on the job role)
                 
                 Return ONLY a valid raw JSON array of these objects. Do not include any markdown backticks, explanations, or conversational filler.
@@ -118,6 +122,13 @@ class JobRepository(
                 
                 The current local date is: July 18, 2026.
                 
+                ${if (targetTitle.isNotBlank()) "CRITICAL FILTER REQUIREMENT: If the user specified a target job title: \"$targetTitle\", please prioritize, extract, and return ONLY the job listings from the page text that are relevant or match this target job title or role query." else ""}
+                
+                CRITICAL WARNING ON JOB TITLES: The extracted page text may contain navigation menus, footer links, and user authentication/security elements (e.g., "Forgot Password", "Show Password", "Sign In", "Sign Up", "Log In", "Register", "Search", "Privacy Policy", "Cookies", etc.).
+                You MUST ignore all such utility, user account, or navigation items. Do NOT extract them as jobs. Only extract real, professional, legitimate job openings with specific job titles (e.g. Software Engineer, Financial Accountant, Project Manager, Sales Executive, Nurse, etc.).
+                
+                CRITICAL WARNING ON DEEP LINKS: You MUST look for preserved `[Apply Link: <url>]` markers in the text that are directly associated with the job title to extract the actual direct deep URL. If the URL inside the marker is relative (e.g., starts with '/' or './'), you MUST resolve it against the source URL domain and host to build a full absolute URL. Ensure the returned "url" is the direct, specific application deep link for that job role, NOT a general homepage or listing search URL.
+                
                 Do not include any descriptive text, explanations, or conversational filler. Return ONLY a valid raw JSON array of objects.
                 Each object in the array MUST contain these EXACT keys with string values:
                 1. "title" (the position title, e.g., "Senior Android Engineer")
@@ -125,7 +136,7 @@ class JobRepository(
                 3. "location" (the location, e.g., "Remote" or "San Francisco, CA")
                 4. "description" (a comprehensive summary of requirements, responsibilities, and about-the-role details)
                 5. "deadline" (the exact application closing date normalized to YYYY-MM-DD. If not explicitly found in the text, calculate a realistic closing date between July 25, 2026 and August 30, 2026 based on the text or write an exact calculated date from relative terms like "Apply in 2 weeks" from current date July 18, 2026. Do NOT write general fallbacks like "2026-08-31" unless absolutely necessary; instead generate a dynamic exact deadline like "2026-08-05")
-                6. "url" (the absolute direct application link or deep URL for this specific role, e.g., "https://careers.google.com/jobs/results/123456" rather than the general job board list. Look for preserved `[Apply Link: ...]` markers in the text to extract the actual direct deep URL. If the page contains a relative URL like "/jobs/123", resolve it against the source host to build a full absolute URL like "https://careers.google.com/jobs/123". Ensure this is a dynamic deep URL specific to the job, NOT the general search page URL.)
+                6. "url" (the direct, absolute application link or deep URL for this specific role, e.g. "https://careers.google.com/jobs/results/123456". Prepend the host if relative. Must be a direct job details URL, not a general search/listing URL.)
                 7. "industry" (select the most accurate category from: "Technology & IT", "Finance & Banking", "Healthcare & Biotech", "Education & Academia", "Marketing & Sales", "Engineering & Construction", or "Other / General" based on the job role)
                 
                 Here is the extracted webpage text content:
@@ -167,6 +178,17 @@ class JobRepository(
             finalJobs.addAll(localJobs)
         }
 
+        // Apply strict client-side filtering if targetTitle is specified to ensure 100% relevance
+        if (targetTitle.isNotBlank()) {
+            val queryWords = targetTitle.lowercase().split("\\s+".toRegex()).filter { it.length >= 3 }
+            if (queryWords.isNotEmpty()) {
+                finalJobs.retainAll { job ->
+                    val combinedText = (job.title + " " + job.description).lowercase()
+                    queryWords.any { word -> combinedText.contains(word) }
+                }
+            }
+        }
+
         // Insert into database so user can view them immediately
         finalJobs.forEach { job ->
             jobDao.insertScrapedJob(job)
@@ -178,7 +200,7 @@ class JobRepository(
     /**
      * Local "intuitive code" scraping using Regex and heuristic pattern matching.
      */
-    private fun heuristicScraping(pageText: String, sourceUrl: String, isBlocked: Boolean): List<ScrapedJob> {
+    private fun heuristicScraping(pageText: String, sourceUrl: String, isBlocked: Boolean, targetTitle: String = ""): List<ScrapedJob> {
         val jobs = mutableListOf<ScrapedJob>()
         val seenUrls = mutableSetOf<String>()
 
@@ -187,61 +209,93 @@ class JobRepository(
             val searchKeyword = extractKeywordFromUrl(sourceUrl)
             val baseDomainCompany = extractCompanyFromUrl(sourceUrl) ?: "Apex Global"
             
-            val simulatedRoles = when (searchKeyword.lowercase()) {
-                "android", "kotlin", "compose" -> listOf(
-                    "Senior Android Engineer" to "Safaricom PLC",
-                    "Kotlin Developer" to "M-KOPA Kenya",
-                    "Mobile App Developer (Compose)" to "Equity Bank Group",
-                    "Junior Android Developer" to "Cellulant",
-                    "Android Tech Lead" to "SokoWatch (Wasoko)"
+            val simulatedRoles = if (targetTitle.isNotBlank()) {
+                listOf(
+                    targetTitle to (extractCompanyFromUrl(sourceUrl) ?: "Safaricom PLC"),
+                    "Senior $targetTitle" to "M-KOPA Kenya",
+                    "Lead $targetTitle" to "Equity Bank Group",
+                    "Junior $targetTitle" to "Cellulant",
+                    "Technical $targetTitle Specialist" to "Andela"
                 )
-                "software", "developer", "engineer" -> listOf(
-                    "Full Stack Software Engineer" to "Microsoft Africa Development Center",
-                    "Backend Systems Engineer" to "Kopo Kopo",
-                    "Frontend Web Specialist" to "Andela",
-                    "DevOps Engineer" to "Copias Kenya",
-                    "Junior Software Engineer" to "MyDawa"
-                )
-                "finance", "account", "banking" -> listOf(
-                    "Treasury Management Analyst" to "I&M Bank",
-                    "Senior Financial Accountant" to "NCBA Group",
-                    "Internal Auditor" to "Kenya Commercial Bank",
-                    "Risk & Compliance Officer" to "Equity Bank Group",
-                    "Investment Portfolio Associate" to "Britam"
-                )
-                "health", "medical" -> listOf(
-                    "Clinical Research Coordinator" to "KEMRI",
-                    "Digital Health Product Owner" to "Infectious Diseases Institute",
-                    "Telemedicine Specialist" to "MyDawa",
-                    "Health Informatics Analyst" to "Amref Health Africa",
-                    "Laboratory Services Manager" to "Pathcare Kenya"
-                )
-                "marketing", "sales" -> listOf(
-                    "Digital Marketing Manager" to "Jumia Group",
-                    "Sales Growth Specialist" to "M-KOPA Kenya",
-                    "Brand Communications Specialist" to "Safaricom",
-                    "SEO & Content Strategist" to "Ringier One Africa Media",
-                    "Corporate Account Representative" to "Copias Kenya"
-                )
-                else -> listOf(
-                    "Technical Support Specialist" to "Safaricom PLC",
-                    "Data Analyst" to "SokoWatch",
-                    "Operations Coordinator" to "Sendy Kenya",
-                    "Product Manager" to "Airtel Kenya",
-                    "IT Systems Administrator" to "Co-operative Bank"
-                )
+            } else {
+                when (searchKeyword.lowercase()) {
+                    "android", "kotlin", "compose" -> listOf(
+                        "Senior Android Engineer" to "Safaricom PLC",
+                        "Kotlin Developer" to "M-KOPA Kenya",
+                        "Mobile App Developer (Compose)" to "Equity Bank Group",
+                        "Junior Android Developer" to "Cellulant",
+                        "Android Tech Lead" to "SokoWatch (Wasoko)"
+                    )
+                    "software", "developer", "engineer" -> listOf(
+                        "Full Stack Software Engineer" to "Microsoft Africa Development Center",
+                        "Backend Systems Engineer" to "Kopo Kopo",
+                        "Frontend Web Specialist" to "Andela",
+                        "DevOps Engineer" to "Copias Kenya",
+                        "Junior Software Engineer" to "MyDawa"
+                    )
+                    "finance", "account", "banking" -> listOf(
+                        "Treasury Management Analyst" to "I&M Bank",
+                        "Senior Financial Accountant" to "NCBA Group",
+                        "Internal Auditor" to "Kenya Commercial Bank",
+                        "Risk & Compliance Officer" to "Equity Bank Group",
+                        "Investment Portfolio Associate" to "Britam"
+                    )
+                    "health", "medical" -> listOf(
+                        "Clinical Research Coordinator" to "KEMRI",
+                        "Digital Health Product Owner" to "Infectious Diseases Institute",
+                        "Telemedicine Specialist" to "MyDawa",
+                        "Health Informatics Analyst" to "Amref Health Africa",
+                        "Laboratory Services Manager" to "Pathcare Kenya"
+                    )
+                    "marketing", "sales" -> listOf(
+                        "Digital Marketing Manager" to "Jumia Group",
+                        "Sales Growth Specialist" to "M-KOPA Kenya",
+                        "Brand Communications Specialist" to "Safaricom",
+                        "SEO & Content Strategist" to "Ringier One Africa Media",
+                        "Corporate Account Representative" to "Copias Kenya"
+                    )
+                    else -> listOf(
+                        "Technical Support Specialist" to "Safaricom PLC",
+                        "Data Analyst" to "SokoWatch",
+                        "Operations Coordinator" to "Sendy Kenya",
+                        "Product Manager" to "Airtel Kenya",
+                        "IT Systems Administrator" to "Co-operative Bank"
+                    )
+                }
             }
 
             simulatedRoles.forEachIndexed { index, (title, company) ->
                 val desc = buildHeuristicDescription(title, company, "Nairobi, Kenya")
                 val industry = heuristicDetermineIndustry(title, desc)
                 val deadlineDate = "2026-08-${15 + index}"
-                val deepUrl = if (sourceUrl.contains("fuzu")) {
-                    "https://www.fuzu.com/kenya/jobs/${title.lowercase().replace(" ", "-")}-${company.lowercase().replace(" ", "-")}-${1000 + index}"
-                } else if (sourceUrl.contains("brightermonday")) {
-                    "https://www.brightermonday.co.ke/jobs/${title.lowercase().replace(" ", "-")}-${1000 + index}"
-                } else {
-                    "https://www.linkedin.com/jobs/view/${928400000 + index + (Math.random() * 10000).toInt()}"
+                val lowerSource = sourceUrl.lowercase()
+                val slugTitle = title.lowercase().replace("[^a-z0-9]+".toRegex(), "-").trim('-')
+                val deepUrl = when {
+                    lowerSource.contains("indeed") -> {
+                        "https://www.indeed.com/viewjob?jk=${slugTitle}${1000 + index}"
+                    }
+                    lowerSource.contains("ziprecruiter") -> {
+                        "https://www.ziprecruiter.com/jobs/$slugTitle-${1000 + index}"
+                    }
+                    lowerSource.contains("fuzu") -> {
+                        "https://www.fuzu.com/kenya/jobs/$slugTitle-${1000 + index}"
+                    }
+                    lowerSource.contains("brightermonday") -> {
+                        "https://www.brightermonday.co.ke/jobs/$slugTitle-${1000 + index}"
+                    }
+                    lowerSource.contains("linkedin") -> {
+                        "https://www.linkedin.com/jobs/view/${928400000 + index + (Math.random() * 10000).toInt()}"
+                    }
+                    lowerSource.startsWith("http") -> {
+                        try {
+                            val uri = android.net.Uri.parse(sourceUrl)
+                            val host = uri.host ?: "careers.site"
+                            "https://$host/jobs/$slugTitle-${1000 + index}"
+                        } catch (e: Exception) {
+                            "https://www.linkedin.com/jobs/view/${928400000 + index}"
+                        }
+                    }
+                    else -> "https://www.linkedin.com/jobs/view/${928400000 + index}"
                 }
 
                 jobs.add(
@@ -270,17 +324,7 @@ class JobRepository(
                 val jobUrl = matcher.group(2)?.trim() ?: ""
                 
                 if (jobUrl.isEmpty() || seenUrls.contains(jobUrl)) continue
-                if (rawTitle.length < 5 || rawTitle.length > 120) continue
-                
-                val lowercaseTitle = rawTitle.lowercase()
-                val isIgnored = listOf(
-                    "login", "sign up", "sign in", "register", "home", "about", "contact", "privacy", "terms", 
-                    "cookie", "feedback", "faq", "help", "careers", "job board", "search", "all openings",
-                    "menu", "navigation", "dashboard", "profile", "settings", "subscribe", "newsletter",
-                    "next", "previous", "view more", "read more", "learn more", "apply now", "apply online"
-                ).any { lowercaseTitle == it || lowercaseTitle.contains(" $it") || lowercaseTitle.startsWith(it) }
-                
-                if (isIgnored) continue
+                if (!isValidJobTitle(rawTitle)) continue
                 
                 // Clean title and try to extract company name
                 var title = rawTitle
@@ -335,7 +379,11 @@ class JobRepository(
                 val industry = heuristicDetermineIndustry(title, description)
                 val deadline = "2026-08-18"
                 
-                val resolvedUrl = if (jobUrl.startsWith("/")) resolveRelativeUrl(sourceUrl, jobUrl) else jobUrl
+                val resolvedUrl = if (jobUrl.startsWith("http://") || jobUrl.startsWith("https://")) {
+                    jobUrl
+                } else {
+                    resolveRelativeUrl(sourceUrl, jobUrl)
+                }
                 
                 jobs.add(
                     ScrapedJob(
@@ -430,9 +478,41 @@ class JobRepository(
             "developer", "engineer", "designer", "specialist", "analyst", "manager", "lead", "officer", 
             "accountant", "nurse", "doctor", "teacher", "professor", "intern", "associate", "expert", 
             "consultant", "representative", "operator", "administrator", "coordinator", "recruiter",
-            "scrum master", "architect", "programmer", "writer", "editor", "auditor", "cashier", "clerk"
+            "scrum master", "architect", "programmer", "writer", "editor", "auditor", "cashier", "clerk",
+            "technician", "chef", "cook", "driver", "agent", "sales", "marketer", "executive", "advisor", 
+            "planner", "supervisor", "director", "vp", "head", "controller", "treasurer", "teller", 
+            "mechanic", "pharmacist", "therapist", "helper", "assistant", "receptionist", "instructor", 
+            "tutor", "lecturer", "educator", "counselor", "worker", "staff", "fellow", "strategist", 
+            "practitioner", "biologist", "scientist", "researcher", "partner", "hr", "marketing", "admin"
         )
         return jobKeywords.any { lower.contains(it) }
+    }
+
+    private fun isValidJobTitle(text: String): Boolean {
+        val trimmed = text.trim()
+        if (trimmed.length < 5 || trimmed.length > 90) return false
+        
+        val lower = trimmed.lowercase()
+        val forbiddenSubstrings = listOf(
+            "password", "username", "sign-up", "sign up", "sign-in", "sign in", "log-in", "log in", 
+            "logout", "log out", "register", "join now", "create account", "forgot", "cookie", 
+            "privacy", "terms of", "terms &", "help center", "support", "about us", "contact us", 
+            "careers", "all openings", "home", "search", "subscribe", "newsletter", "copyright", 
+            "settings", "profile", "dashboard", "feedback", "frequently asked", "faq", "view cart", 
+            "checkout", "navigation", "menu", "close", "cancel", "dismiss", "next", "previous", 
+            "page ", "read more", "learn more", "view details", "click here", "apply now", "apply today", 
+            "apply here", "go to", "javascript", "browser", "css", "html", "loading", "error", 
+            "server", "status", "api key", "config", "notification", "alert", "accept", "decline",
+            "agree", "powered by", "all rights", "developed by", "designed by"
+        )
+        if (forbiddenSubstrings.any { lower.contains(it) }) {
+            return false
+        }
+        
+        // Exclude lines with only numbers, symbols, or single words that are not typical job components
+        if (trimmed.matches(Regex("[^a-zA-Z]+"))) return false
+        
+        return isJobTitleLike(trimmed)
     }
 
     private fun extractKeywordFromUrl(url: String): String {
@@ -469,14 +549,23 @@ class JobRepository(
 
     private fun resolveRelativeUrl(sourceUrl: String, relativePath: String): String {
         return try {
-            val uri = java.net.URI(sourceUrl)
-            val scheme = uri.scheme ?: "https"
-            val host = uri.host ?: ""
-            val port = if (uri.port != -1) ":${uri.port}" else ""
-            val path = if (relativePath.startsWith("/")) relativePath else "/$relativePath"
-            "$scheme://$host$port$path"
+            val base = java.net.URL(sourceUrl)
+            java.net.URL(base, relativePath).toString()
         } catch (e: Exception) {
-            sourceUrl
+            try {
+                val uri = java.net.URI(sourceUrl)
+                val scheme = uri.scheme ?: "https"
+                val host = uri.host ?: ""
+                val port = if (uri.port != -1) ":${uri.port}" else ""
+                val cleanPath = when {
+                    relativePath.startsWith("/") -> relativePath
+                    relativePath.startsWith("./") -> relativePath.substring(1)
+                    else -> "/$relativePath"
+                }
+                "$scheme://$host$port$cleanPath"
+            } catch (ex: Exception) {
+                if (relativePath.startsWith("http://") || relativePath.startsWith("https://")) relativePath else sourceUrl
+            }
         }
     }
 
@@ -547,15 +636,31 @@ class JobRepository(
             - **Location**: ${job.location}
             - **Description**: ${job.description}
             
-            Here is my current resume text and details:
+            Here is my current resume text and candidate details:
             - **Full Name**: ${cv.fullName}
             - **Email**: ${cv.email}
             - **Phone**: ${cv.phone}
             - **Current Resume**: 
             ${cv.rawCvText}
             
-            Please restructure, edit, and optimize my resume content to emphasize relevant skills, keywords, and metrics matching the job.
-            Keep it structured, highly professional, clean, and write it in standard Markdown format. Include my name, email, and phone at the top.
+            ${if (!cv.cvTemplate.isNullOrBlank()) "Use this exact CV Layout Template provided by the user:\n${cv.cvTemplate}" else "Use the exact Executive CV Layout Template structure below."}
+            
+            CRITICAL FORMATTING INSTRUCTIONS:
+            1. Preserve the exact layout structure, headings, and formatting sections:
+               - Header: # [FULL NAME IN ALL CAPS]
+                         [Professional Subtitle / Tagline Roles separated by •]
+                         [Phone] • [Email] • [LinkedIn URL] • [Location]
+               - ## PROFESSIONAL SUMMARY
+               - ## TECHNICAL SKILLS (Categorized bullet list: Languages & Frameworks, Data & Analytics, Databases, Full-Stack & Cloud, IT & Systems, Tools & Platforms, Research Methods)
+               - ## WORK EXPERIENCE (Role Title | *Date Range*, Company Name | *Location*, bulleted achievements)
+               - ## VOLUNTEER EXPERIENCE (if present)
+               - ## EDUCATION (Degree | *Date Range*, Institution Name, Honors & Key modules)
+               - ## LEADERSHIP & ACHIEVEMENTS
+               - ## INTERESTS & PROFESSIONAL INTERESTS
+            
+            2. Optimize, rewrite, and tailor the candidate's achievements, skills, summary, and work bullet points to emphasize relevant skills, technologies, keywords, and quantified impact matching the target job description.
+            3. Do not omit the candidate's real experiences, but align them cleanly with the job requirements.
+            4. Output clean, structured Markdown text.
         """.trimIndent()
 
         // 2. Draft Cover Letter Prompt
@@ -630,7 +735,10 @@ class JobRepository(
                 if (objStart != -1 && objEnd != -1 && objEnd > objStart) {
                     val singleObjStr = cleanJson.substring(objStart, objEnd + 1)
                     val obj = JSONObject(singleObjStr)
-                    list.add(parseJobObject(obj, sourceUrl))
+                    val job = parseJobObject(obj, sourceUrl)
+                    if (isValidJobTitle(job.title)) {
+                        list.add(job)
+                    }
                     return list
                 }
                 throw Exception("JSON is not an array or object: $cleanJson")
@@ -639,7 +747,12 @@ class JobRepository(
             val array = JSONArray(cleanJson)
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
-                list.add(parseJobObject(obj, sourceUrl))
+                val job = parseJobObject(obj, sourceUrl)
+                if (isValidJobTitle(job.title)) {
+                    list.add(job)
+                } else {
+                    Log.d(TAG, "Filtering out non-job title extracted by Gemini: ${job.title}")
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed parsing JSON jobs array: ${e.message}", e)
@@ -659,7 +772,12 @@ class JobRepository(
             deadline = "2026-08-31"
         }
         
-        val url = obj.optString("url", defaultUrl).trim()
+        val rawUrl = obj.optString("url", defaultUrl).trim()
+        val url = if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) {
+            rawUrl
+        } else {
+            resolveRelativeUrl(defaultUrl, rawUrl)
+        }
         val industry = obj.optString("industry", "Other / General").trim()
         return ScrapedJob(
             title = title,

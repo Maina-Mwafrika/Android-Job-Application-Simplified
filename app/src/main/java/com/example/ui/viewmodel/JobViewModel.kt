@@ -131,7 +131,7 @@ class JobViewModel(private val repository: JobRepository) : ViewModel() {
     /**
      * Scrapes jobs from the specified URL using Gemini data extraction.
      */
-    fun scrapeJobs(url: String) {
+    fun scrapeJobs(url: String, targetTitle: String = "") {
         if (url.trim().isEmpty()) {
             _scrapingState.value = ScrapingState.Error("Please enter a valid URL.")
             return
@@ -140,7 +140,7 @@ class JobViewModel(private val repository: JobRepository) : ViewModel() {
         viewModelScope.launch {
             _scrapingState.value = ScrapingState.Loading
             try {
-                val jobs = repository.scrapeJobsFromUrl(url.trim())
+                val jobs = repository.scrapeJobsFromUrl(url.trim(), targetTitle.trim())
                 _scrapingState.value = ScrapingState.Success(jobs.size)
             } catch (e: Exception) {
                 _scrapingState.value = ScrapingState.Error(e.localizedMessage ?: "Unknown scraping error")
@@ -423,13 +423,16 @@ class JobViewModel(private val repository: JobRepository) : ViewModel() {
 
                 Toast.makeText(context, "Application Logged for ${job.title} at ${job.company}!", Toast.LENGTH_SHORT).show()
 
-                // Launch direct link
-                val url = if (job.url.startsWith("http://") || job.url.startsWith("https://")) {
-                    job.url
+                // Direct launch of specific job application URL
+                val rawUrl = job.url.trim()
+                val targetUrl = if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) {
+                    rawUrl
                 } else {
-                    "https://www.google.com/search?q=${Uri.encode("${job.title} ${job.company} apply")}"
+                    val searchQuery = Uri.encode("${job.title} ${job.company}")
+                    "https://www.google.com/search?q=$searchQuery"
                 }
-                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+
+                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 context.startActivity(browserIntent)
@@ -768,20 +771,43 @@ class JobViewModel(private val repository: JobRepository) : ViewModel() {
                 }
                 
                 val defaultTemplate = """
-                    # [Full Name]
-                    [Email] | [Phone]
-                    
+                    # ${cv.fullName.ifBlank { "FULL NAME" }}
+                    IT Specialist • Software Engineer • Data Analyst • Full-Stack Developer
+                    ${cv.phone} • ${cv.email} • linkedin.com/in/andrea-maina-githaigah • Nairobi, Kenya
+
                     ## PROFESSIONAL SUMMARY
-                    [Professional summary tailored specifically to the role...]
-                    
-                    ## CORE COMPETENCIES & KEYWORDS
-                    [Bullet list of relevant skills, methodologies, and technologies matching the description]
-                    
-                    ## RELEVANT EXPERIENCE
-                    [Experience items structured with Title, Company, Date, and accomplishment bullets addressing missing skills and job requirements]
-                    
+                    [A professional summary tailored specifically to the role...]
+
+                    ## TECHNICAL SKILLS
+                    - **Languages & Frameworks:** [Relevant languages...]
+                    - **Data & Analytics:** [Relevant analytical tools...]
+                    - **Databases:** [Relevant databases...]
+                    - **Full-Stack & Cloud:** [APIs, cloud, version control...]
+                    - **IT & Systems:** [System admin, troubleshooting...]
+                    - **Tools & Platforms:** [Dev tools...]
+                    - **Research Methods:** [Methodologies...]
+
+                    ## WORK EXPERIENCE
+                    **[Job Title / Role]** | *[Start Date – End Date]*
+                    **[Company Name]** | *[Location]*
+                    - [Accomplishment bullet 1 with key job keywords]
+                    - [Accomplishment bullet 2 highlighting metrics and technologies]
+
+                    ## VOLUNTEER EXPERIENCE
+                    **[Role Title]** | *[Date Range]*
+                    **[Organization Name]**
+                    - [Volunteer contribution...]
+
                     ## EDUCATION
-                    [Education degree, institution, and graduation year]
+                    **[Degree Name]** | *[Start Date – End Date]*
+                    **[Institution Name]**
+                    [Honors / Distinction] | Key modules: [Key modules]
+
+                    ## LEADERSHIP & ACHIEVEMENTS
+                    - **[Role / Title, Organization (Year)]** — [Brief description]
+
+                    ## INTERESTS & PROFESSIONAL INTERESTS
+                    Technology Innovation • Data Analytics & Visualization • Artificial Intelligence • Open Source Technologies • Digital Transformation • Guitars • Chess
                 """.trimIndent()
                 
                 val templateText = if (!cv.cvTemplate.isNullOrBlank()) cv.cvTemplate else defaultTemplate

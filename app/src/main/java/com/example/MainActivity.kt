@@ -22,6 +22,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontStyle
@@ -57,6 +61,21 @@ import com.example.ui.viewmodel.*
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.foundation.Canvas
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -96,65 +115,128 @@ class MainActivity : ComponentActivity() {
 fun JobCraftApp(viewModel: JobViewModel) {
     val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(1) } // Default to Job Scraper tab
+    var triggerConfetti by remember { mutableStateOf(false) }
 
     val logs by viewModel.appliedLogs.collectAsStateWithLifecycle()
     val scrapedJobs by viewModel.scrapedJobs.collectAsStateWithLifecycle()
     val cvState by viewModel.userCv.collectAsStateWithLifecycle()
 
-    Scaffold(
-        bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 8.dp
-            ) {
-                NavigationBarItem(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    icon = { Icon(Icons.Default.Person, contentDescription = "CV Profile") },
-                    label = { Text("CV Profile") }
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    icon = { Icon(Icons.Default.Search, contentDescription = "Scraper") },
-                    label = { Text("Scraper & Tailor") }
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
-                    icon = { Icon(Icons.Default.Assignment, contentDescription = "Applications Log") },
-                    label = { Text("Applied Logs") }
-                )
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            bottomBar = {
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 8.dp
+                ) {
+                    NavigationBarItem(
+                        selected = selectedTab == 0,
+                        onClick = { selectedTab = 0 },
+                        icon = {
+                            val scale by animateFloatAsState(
+                                targetValue = if (selectedTab == 0) 1.25f else 1.0f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioHighBouncy,
+                                    stiffness = Spring.StiffnessMedium
+                                ),
+                                label = "NavIcon0Scale"
+                            )
+                            Icon(
+                                imageVector = if (selectedTab == 0) Icons.Default.Person else Icons.Outlined.Person,
+                                contentDescription = "CV Profile",
+                                modifier = Modifier.graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                }
+                            )
+                        },
+                        label = { Text("CV Profile") }
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == 1,
+                        onClick = { selectedTab = 1 },
+                        icon = {
+                            val scale by animateFloatAsState(
+                                targetValue = if (selectedTab == 1) 1.25f else 1.0f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioHighBouncy,
+                                    stiffness = Spring.StiffnessMedium
+                                ),
+                                label = "NavIcon1Scale"
+                            )
+                            Icon(
+                                imageVector = if (selectedTab == 1) Icons.Default.Search else Icons.Outlined.Search,
+                                contentDescription = "Scraper",
+                                modifier = Modifier.graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                }
+                            )
+                        },
+                        label = { Text("Scraper & Tailor") }
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == 2,
+                        onClick = { selectedTab = 2 },
+                        icon = {
+                            val scale by animateFloatAsState(
+                                targetValue = if (selectedTab == 2) 1.25f else 1.0f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioHighBouncy,
+                                    stiffness = Spring.StiffnessMedium
+                                ),
+                                label = "NavIcon2Scale"
+                            )
+                            Icon(
+                                imageVector = if (selectedTab == 2) Icons.Default.Assignment else Icons.Outlined.Assignment,
+                                contentDescription = "Applications Log",
+                                modifier = Modifier.graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                }
+                            )
+                        },
+                        label = { Text("Applied Logs") }
+                    )
+                }
             }
-        }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
-                            Color.Transparent
+        ) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
+                                Color.Transparent
+                            )
                         )
                     )
+            ) {
+                // App Header with reactive applied logs size, scraped listings size, and username
+                AppHeader(
+                    appliedCount = logs.size,
+                    scrapedCount = scrapedJobs.size,
+                    fullName = cvState?.fullName
                 )
-        ) {
-            // App Header with reactive applied logs size, scraped listings size, and username
-            AppHeader(
-                appliedCount = logs.size,
-                scrapedCount = scrapedJobs.size,
-                fullName = cvState?.fullName
-            )
 
-            // Tab Screen Routing
-            when (selectedTab) {
-                0 -> CvProfileScreen(viewModel = viewModel)
-                1 -> JobScraperScreen(viewModel = viewModel)
-                2 -> AppliedLogsScreen(viewModel = viewModel)
+                // Tab Screen Routing
+                when (selectedTab) {
+                    0 -> CvProfileScreen(viewModel = viewModel)
+                    1 -> JobScraperScreen(
+                        viewModel = viewModel,
+                        onTriggerConfetti = { triggerConfetti = true }
+                    )
+                    2 -> AppliedLogsScreen(viewModel = viewModel)
+                }
             }
         }
+
+        // Celebrate overlay drawn on top of everything!
+        ConfettiEffect(
+            trigger = triggerConfetti,
+            onFinished = { triggerConfetti = false }
+        )
     }
 }
 
@@ -406,10 +488,10 @@ fun CvProfileScreen(viewModel: JobViewModel) {
     var rawCvText by remember { mutableStateOf("") }
     var cvTemplate by remember { mutableStateOf("") }
 
-    // LinkedIn Import Dialog States
+    // LinkedIn / Profile Import Dialog States with Retained Root Admin Credentials
     var showLinkedInDialog by remember { mutableStateOf(false) }
-    var linkedInEmail by remember { mutableStateOf("") }
-    var linkedInPassword by remember { mutableStateOf("") }
+    var linkedInEmail by remember { mutableStateOf("root") }
+    var linkedInPassword by remember { mutableStateOf("root") }
     var isImportingLinkedIn by remember { mutableStateOf(false) }
     var importStepText by remember { mutableStateOf("") }
     var importProgress by remember { mutableStateOf(0f) }
@@ -540,8 +622,8 @@ fun CvProfileScreen(viewModel: JobViewModel) {
                         OutlinedTextField(
                             value = linkedInEmail,
                             onValueChange = { linkedInEmail = it },
-                            label = { Text("LinkedIn Email / Phone") },
-                            placeholder = { Text("username@linkedin.com") },
+                            label = { Text("Username / Admin Email") },
+                            placeholder = { Text("root") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             leadingIcon = { Icon(Icons.Default.Person, null, tint = Color(0xFF0077B5)) }
@@ -555,6 +637,27 @@ fun CvProfileScreen(viewModel: JobViewModel) {
                             singleLine = true,
                             leadingIcon = { Icon(Icons.Default.Lock, null, tint = Color(0xFF0077B5)) }
                         )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF0077B5).copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Shield,
+                                contentDescription = null,
+                                tint = Color(0xFF0077B5),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Admin Access Active: Retained root / root credentials",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF0077B5)
+                            )
+                        }
                     }
                 }
             },
@@ -590,6 +693,8 @@ fun CvProfileScreen(viewModel: JobViewModel) {
             .padding(horizontal = 20.dp)
             .verticalScroll(rememberScrollState())
     ) {
+        Spacer(modifier = Modifier.height(12.dp))
+
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(24.dp),
@@ -625,6 +730,7 @@ fun CvProfileScreen(viewModel: JobViewModel) {
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier
                 .fillMaxWidth()
+                .bounceClick()
                 .height(50.dp)
         ) {
             Icon(Icons.Default.Login, contentDescription = null, tint = Color.White)
@@ -692,7 +798,9 @@ fun CvProfileScreen(viewModel: JobViewModel) {
             )
             OutlinedButton(
                 onClick = { cvFileLauncher.launch(fileTypes) },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .bounceClick(),
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Icon(Icons.Default.UploadFile, null)
@@ -702,7 +810,9 @@ fun CvProfileScreen(viewModel: JobViewModel) {
 
             OutlinedButton(
                 onClick = { templateFileLauncher.launch(fileTypes) },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .bounceClick(),
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Icon(Icons.Default.DriveFolderUpload, null)
@@ -757,32 +867,88 @@ fun CvProfileScreen(viewModel: JobViewModel) {
             TextButton(
                 onClick = {
                     cvTemplate = """
-                        # [Full Name]
-                        [Email] | [Phone]
-                        
+                        # ANDREA ANTHONY MAINA GITHAIGAH
+                        IT Specialist • Software Engineer • Data Analyst • Full-Stack Developer
+                        +254 702 654 694 • mainagithaigah@gmail.com • linkedin.com/in/andrea-maina-githaigah • Nairobi, Kenya
+
                         ## PROFESSIONAL SUMMARY
-                        [A professional summary tailored specifically to the role...]
-                        
-                        ## CORE COMPETENCIES & KEYWORDS
-                        - [Skill 1]
-                        - [Skill 2]
-                        - [Skill 3]
-                        
-                        ## PROFESSIONAL EXPERIENCE
-                        ### [Company Name] — [Job Title]
-                        *[Start Date] - [End Date]*
-                        - [Accomplishment 1: Action-oriented results with key job keywords]
-                        - [Accomplishment 2: Highlight metrics and technologies used]
-                        
+                        Results-driven IT professional with a BSc in Information Technology and a Postgraduate Diploma in Health Research Methods (Distinction), with hands-on research experience at KEMRI-Wellcome Trust. Combines solid software engineering foundations, Python, SQL, Java, full-stack development, with practical expertise in data analytics, HL7-FHIR health data standards, and digital systems design. Seeking roles in IT, software engineering, data analysis, or full-stack development where technical breadth and research rigour can drive real impact.
+
+                        ## TECHNICAL SKILLS
+                        - **Languages & Frameworks:** Python (Pandas, NumPy, Matplotlib, Seaborn), SQL, Java, JavaScript, HTML/CSS, Bash/Shell, C#, Julia, C++, React, Kotlin
+                        - **Data & Analytics:** Data Cleaning, Data Modeling, Statistical Analysis, Data Visualization, Dashboard Development, Machine Learning Concepts, NVivo, FHIR JSON, Epidemiological Analysis
+                        - **Databases:** MySQL, PostgreSQL, Oracle DB, Database Querying, Data Warehousing Concepts
+                        - **Full-Stack & Cloud:** REST APIs, HL7-FHIR, JSON, Git/GitHub, Linux/Ubuntu, Basic Cloud (AWS concepts)
+                        - **IT & Systems:** Network Troubleshooting, Hardware Installation & Maintenance, Software Installation & Configuration, IT Inventory Management, System Administration, Windows & macOS, Active Directory basics
+                        - **Tools & Platforms:** Microsoft Office 365 (Excel, Word, PowerPoint), Power BI concepts, Tableau basics, VS Code, Jupyter Notebooks
+                        - **Research Methods:** Research Design, Hypothesis Testing, Literature Review, LQAS Methodology, Epidemiological Surveillance, Data Integrity & Validation, Technical Documentation, Report Writing
+
+                        ## WORK EXPERIENCE
+                        **Data & Technology Specialist** | *Sep 2025 – Present*
+                        **Vantix** | *Nairobi, Kenya*
+                        - Designed and implemented data-driven digital solutions for NGOs and research organizations, improving data accessibility and informed decision-making across multiple projects.
+                        - Engineered and maintained data pipelines using Python and SQL to structure, clean, and transform large datasets for reporting, analytics, and stakeholder dashboards.
+                        - Built and maintained data infrastructure and digital platforms to support research monitoring, KPI tracking, and decision-support systems.
+                        - Collaborated cross-functionally with developers and domain experts to deliver clear, actionable data visualizations from complex multi-source datasets.
+                        - Documented technical workflows, analytical processes, and system architectures to ensure reproducibility and knowledge transfer.
+
+                        **Postgraduate Research Fellow (Attachment)** | *Jan 2024 – Oct 2025*
+                        **KEMRI-Wellcome Trust Research Programme — Under Dr. George Githinji**
+                        - Conducted advanced data analysis to model and visualize the genomic spread of SARS-CoV-2 variants across Kenya using Python (Pandas, NumPy, Matplotlib), applying bioinformatics and epidemiological frameworks.
+                        - Developed a proof-of-concept data standardization framework in Python adhering to HL7-FHIR standards, enhancing interoperability across public health information systems.
+                        - Designed data models and built an epidemiological disease visualization dashboard, translating genomic surveillance data into actionable public health insights.
+                        - Conducted systematic literature reviews and synthesized findings to inform study design, algorithm selection, and analytical methodology.
+                        - Maintained data integrity across research datasets; applied rigorous validation, cleaning, and quality control procedures.
+
+                        **LQAS Supervisor – Polio Vaccination Campaign** | *Jun 2023 – Dec 2023*
+                        **World Health Organization (WHO)** | *Lari Sub-County, Kiambu County*
+                        - Supervised Lot Quality Assurance Sampling (LQAS) surveys across three vaccination rounds, ensuring data integrity and coverage accuracy for over 50,000 target beneficiaries.
+                        - Collected, validated, and synthesized field data into structured reports, identifying coverage gaps and directly informing WHO and Ministry of Health follow-up vaccination strategies.
+                        - Coordinated field teams, managed data collection logistics, and maintained quality standards in high-pressure, resource-constrained environments.
+
+                        **Technical Support Intern — MIS Department** | *May 2019 – Aug 2019*
+                        **Bata Shoe Kenya PLC**
+                        - Provided on-site technical support in a fast-paced corporate environment, diagnosing and resolving issues across network infrastructure, computer hardware, enterprise software, and servers.
+                        - Designed Oracle database queries and generated operational reports to support business intelligence and departmental efficiency.
+                        - Assisted in installation, configuration, and deployment of hardware, operating systems, and enterprise software applications.
+                        - Performed routine system maintenance, performance checks, and end-user training, ensuring minimal downtime and optimal IT system performance.
+
+                        **Library Assistant — Digitization Project** | *Mar 2016 – Jul 2017*
+                        **Kenya Baptist Theological College**
+                        - Led a full-scale digitization and re-cataloguing of the library's entire collection, demonstrating meticulous data migration, metadata management, and systematic organization skills.
+
+                        ## VOLUNTEER EXPERIENCE
+                        **Volunteer — Community Health & Disaster Response** | *2020 – Present*
+                        **Kenya Red Cross Society**
+                        - Engage in community health outreach, disaster preparedness, and response activities, demonstrating resilience and commitment to humanitarian principles.
+                        - Provide education on disease prevention and health-seeking behaviors to diverse community groups.
+
                         ## EDUCATION
-                        ### [Degree Name] — [Institution]
-                        *[Year of Graduation]*
+                        **Postgraduate Diploma in Health Research Methods** | *Jan 2024 – Oct 2025*
+                        **Pwani University (Research Attachment: KEMRI-Wellcome Trust)**
+                        Graduated with Distinction | Key modules: Epidemiology, Biostatistics, Research Design, Health Informatics, Data Management & Analysis
+
+                        **Bachelor of Science in Information Technology** | *2016 – 2020*
+                        **Multimedia University of Kenya**
+                        Second Class Honours, Upper Division | Key modules: Software Engineering, Database Systems, Networking, Systems Analysis, Web Development, Java Programming
+
+                        **Kenya Certificate of Secondary Education (KCSE)** | *2012 – 2015*
+                        **Thika High School**
+                        Grade: B+ (73 Points)
+
+                        ## LEADERSHIP & ACHIEVEMENTS
+                        - **Electoral Commission Chair, Multimedia University (2019)** — Managed and facilitated campus-wide student leader elections with full logistical coordination.
+                        - **Deputy School President, Thika High School (2014)** — Designed and implemented student engagement initiatives that reduced student truancy by 100%.
+                        - **Youth Delegate to Japan (2014)** — Selected to represent Kenya at a UNESCO conference in Okayama, presenting on Education for Sustainable Development.
+
+                        ## INTERESTS & PROFESSIONAL INTERESTS
+                        Technology Innovation • Data Analytics & Visualization • Artificial Intelligence & Machine Learning • Open Source Technologies • Digital Transformation • Public Health Technology • Software Engineering for Social Impact • Guitars • Chess
                     """.trimIndent()
                 }
             ) {
                 Icon(Icons.Default.AutoFixHigh, null, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Load Classic Template", fontSize = 11.sp)
+                Text("Load Executive Base Template", fontSize = 11.sp)
             }
         }
 
@@ -818,6 +984,7 @@ fun CvProfileScreen(viewModel: JobViewModel) {
             shape = CircleShape,
             modifier = Modifier
                 .fillMaxWidth()
+                .bounceClick()
                 .height(48.dp)
         ) {
             Icon(Icons.Default.Save, contentDescription = null)
@@ -878,7 +1045,7 @@ fun getJobIndustry(job: ScrapedJob): String {
 // SCREEN 1: JOB SCRAPER & AI TAILOR SCREEN
 // ==========================================
 @Composable
-fun JobScraperScreen(viewModel: JobViewModel) {
+fun JobScraperScreen(viewModel: JobViewModel, onTriggerConfetti: () -> Unit) {
     val context = LocalContext.current
     val scrapingState by viewModel.scrapingState.collectAsStateWithLifecycle()
     val customizingState by viewModel.customizingState.collectAsStateWithLifecycle()
@@ -920,15 +1087,19 @@ fun JobScraperScreen(viewModel: JobViewModel) {
         )
     }
 
+    // Target Job Title input for targeted scraping
+    var scrapeTargetTitle by remember { mutableStateOf("") }
+
     // Job Board URL Pre-fill Selection States
     var expandedBoardDropdown by remember { mutableStateOf(false) }
-    val boardsList = remember {
+    val boardsList = remember(scrapeTargetTitle) {
+        val query = if (scrapeTargetTitle.isNotBlank()) scrapeTargetTitle.trim() else "android developer"
         listOf(
-            "LinkedIn" to "https://www.linkedin.com/jobs/search?keywords=android+developer",
-            "Indeed" to "https://www.indeed.com/jobs?q=kotlin+developer",
-            "ZipRecruiter" to "https://www.ziprecruiter.com/jobs-search?search=software+engineer",
-            "Fuzu (Nairobi)" to "https://www.fuzu.com/kenya/jobs?q=developer",
-            "BrighterMonday (Nairobi)" to "https://www.brightermonday.co.ke/jobs?q=software+developer"
+            "LinkedIn" to "https://www.linkedin.com/jobs/search?keywords=${android.net.Uri.encode(query)}",
+            "Indeed" to "https://www.indeed.com/jobs?q=${android.net.Uri.encode(query)}",
+            "ZipRecruiter" to "https://www.ziprecruiter.com/jobs-search?search=${android.net.Uri.encode(query)}",
+            "Fuzu (Nairobi)" to "https://www.fuzu.com/kenya/jobs?q=${android.net.Uri.encode(query)}",
+            "BrighterMonday (Nairobi)" to "https://www.brightermonday.co.ke/jobs?q=${android.net.Uri.encode(query)}"
         )
     }
 
@@ -951,6 +1122,7 @@ fun JobScraperScreen(viewModel: JobViewModel) {
             val title = (customizingState as CustomizingState.Success).jobTitle
             val comp = (customizingState as CustomizingState.Success).company
             Toast.makeText(context, "Tailored items prepared successfully for $title at $comp!", Toast.LENGTH_LONG).show()
+            onTriggerConfetti()
             viewModel.resetCustomizingState()
         } else if (customizingState is CustomizingState.Error) {
             val msg = (customizingState as CustomizingState.Error).message
@@ -1040,6 +1212,19 @@ fun JobScraperScreen(viewModel: JobViewModel) {
 
                 Spacer(modifier = Modifier.height(4.dp))
 
+                // New Target Job Title Field
+                OutlinedTextField(
+                    value = scrapeTargetTitle,
+                    onValueChange = { scrapeTargetTitle = it },
+                    label = { Text("Target Job Title (e.g. Android Developer)") },
+                    placeholder = { Text("Specify a title to search/scrape specifically") },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(20.dp)) }
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
                 // Board selection dropdown and horizontal suggestion chips
                 Row(
                     modifier = Modifier
@@ -1055,22 +1240,58 @@ fun JobScraperScreen(viewModel: JobViewModel) {
                         modifier = Modifier.padding(end = 6.dp)
                     )
                     Box {
+                        val currentBoardName = remember(jobUrlInput, boardsList) {
+                            boardsList.find { it.second == jobUrlInput }?.first ?: "Select Board"
+                        }
+
                         OutlinedButton(
                             onClick = { expandedBoardDropdown = true },
                             shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            modifier = Modifier.height(28.dp)
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = Color.White,
+                                contentColor = Color.Black
+                            ),
+                            border = BorderStroke(1.dp, Color(0xFFCCCCCC)),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.height(32.dp)
                         ) {
-                            Text("Select Board", fontSize = 10.sp)
-                            Icon(Icons.Default.ArrowDropDown, null, modifier = Modifier.size(12.dp))
+                            Text(currentBoardName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(Icons.Default.ArrowDropDown, null, modifier = Modifier.size(16.dp), tint = Color.Black)
                         }
                         DropdownMenu(
                             expanded = expandedBoardDropdown,
-                            onDismissRequest = { expandedBoardDropdown = false }
+                            onDismissRequest = { expandedBoardDropdown = false },
+                            modifier = Modifier
+                                .background(Color.White)
+                                .border(
+                                    width = 1.dp,
+                                    color = Color(0xFFDDDDDD),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
                         ) {
                             boardsList.forEach { (name, url) ->
                                 DropdownMenuItem(
-                                    text = { Text(name) },
+                                    text = {
+                                        Text(
+                                            text = name,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.Black
+                                        )
+                                    },
+                                    colors = MenuDefaults.itemColors(
+                                        textColor = Color.Black,
+                                        leadingIconColor = Color(0xFF1B4D89)
+                                    ),
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.Business,
+                                            contentDescription = null,
+                                            tint = Color(0xFF1B4D89),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    },
                                     onClick = {
                                         jobUrlInput = url
                                         expandedBoardDropdown = false
@@ -1118,13 +1339,15 @@ fun JobScraperScreen(viewModel: JobViewModel) {
                     Button(
                         onClick = {
                             if (jobUrlInput.isNotEmpty()) {
-                                viewModel.scrapeJobs(jobUrlInput)
+                                viewModel.scrapeJobs(jobUrlInput, scrapeTargetTitle)
                             } else {
                                 Toast.makeText(context, "Please enter a valid listing URL first.", Toast.LENGTH_SHORT).show()
                             }
                         },
                         shape = CircleShape,
-                        modifier = Modifier.height(56.dp)
+                        modifier = Modifier
+                            .bounceClick()
+                            .height(56.dp)
                     ) {
                         Icon(Icons.Default.CloudDownload, contentDescription = "Scrape")
                     }
@@ -1223,6 +1446,7 @@ fun JobScraperScreen(viewModel: JobViewModel) {
                                         manualUrl
                                     )
                                     Toast.makeText(context, "Manual job listing added!", Toast.LENGTH_SHORT).show()
+                                    onTriggerConfetti()
                                     showManualForm = false
                                     manualTitle = ""
                                     manualCompany = ""
@@ -1232,6 +1456,7 @@ fun JobScraperScreen(viewModel: JobViewModel) {
                             shape = CircleShape,
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .bounceClick()
                                 .height(48.dp)
                         ) {
                             Text("Add to Available Openings", fontWeight = FontWeight.Bold)
@@ -1244,32 +1469,50 @@ fun JobScraperScreen(viewModel: JobViewModel) {
         // 2. Loading State Blockers
         item {
             if (scrapingState is ScrapingState.Loading) {
-                Box(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 12.dp),
-                    contentAlignment = Alignment.Center
+                        .padding(vertical = 12.dp)
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator()
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Fetching webpage & analyzing jobs with Gemini...", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Text(
+                            "Fetching webpage & extracting openings with Gemini AI...",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    repeat(2) {
+                        ShimmerJobPlaceholder()
                     }
                 }
             }
 
             if (customizingState is CustomizingState.Loading) {
-                Box(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 12.dp),
-                    contentAlignment = Alignment.Center
+                        .padding(vertical = 12.dp)
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.secondary)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Customizing CV and compiling Cover Letter via Gemini...", fontSize = 13.sp, color = MaterialTheme.colorScheme.secondary)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.secondary)
+                        Text(
+                            "Customizing CV & writing Cover Letter via Gemini AI...",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
                     }
+                    ShimmerJobPlaceholder()
                 }
             }
         }
@@ -1448,7 +1691,10 @@ fun JobScraperScreen(viewModel: JobViewModel) {
                     viewModel = viewModel,
                     hasCvConfigured = cvState != null,
                     onCustomize = { viewModel.customizeJob(job.id) },
-                    onApply = { viewModel.applyForJob(context, job) },
+                    onApply = {
+                        viewModel.applyForJob(context, job)
+                        onTriggerConfetti()
+                    },
                     onReminder = { viewModel.addCalendarReminder(context, job.title, job.company, job.deadline) },
                     onShareCv = { viewModel.shareCustomizedCv(context, job) },
                     onShareCl = { viewModel.shareCoverLetter(context, job) },
@@ -1480,11 +1726,17 @@ fun ScrapedJobCard(
     val matchLoadingState by viewModel.matchCalculationLoading.collectAsStateWithLifecycle()
     val isCalculatingMatch = matchLoadingState[job.id] ?: false
 
+    val cardInteractionSource = remember { MutableInteractionSource() }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(28.dp))
-            .clickable { expanded = !expanded },
+            .bounceClick(cardInteractionSource)
+            .clickable(
+                interactionSource = cardInteractionSource,
+                indication = LocalIndication.current
+            ) { expanded = !expanded },
         shape = RoundedCornerShape(28.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
         colors = CardDefaults.cardColors(
@@ -1574,7 +1826,7 @@ fun ScrapedJobCard(
                     )
                 }
 
-                // Edit and Delete buttons
+                // Edit and Delete buttons + Rotating Expand arrow
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { showEditDialog = true }, modifier = Modifier.size(28.dp)) {
                         Icon(
@@ -1593,6 +1845,24 @@ fun ScrapedJobCard(
                             modifier = Modifier.size(18.dp)
                         )
                     }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    
+                    val arrowRotation by animateFloatAsState(
+                        targetValue = if (expanded) 180f else 0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessLow
+                        ),
+                        label = "CardExpansionRotation"
+                    )
+                    Icon(
+                        imageVector = Icons.Default.ExpandMore,
+                        contentDescription = if (expanded) "Collapse Card" else "Expand Card",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .size(24.dp)
+                            .graphicsLayer { rotationZ = arrowRotation }
+                    )
                 }
             }
 
@@ -1837,6 +2107,7 @@ fun ScrapedJobCard(
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .bounceClick()
                                         .height(48.dp)
                                 ) {
                                     Icon(Icons.Default.Chat, null)
@@ -1850,6 +2121,7 @@ fun ScrapedJobCard(
                                     shape = CircleShape,
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .bounceClick()
                                         .height(48.dp)
                                 ) {
                                     Icon(Icons.Default.AutoAwesome, null)
@@ -2009,19 +2281,26 @@ fun ScrapedJobCard(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             // Calendar Reminder
                             OutlinedButton(
                                 onClick = onReminder,
                                 shape = CircleShape,
                                 modifier = Modifier
-                                    .weight(1f)
+                                    .weight(1.1f)
+                                    .bounceClick()
                                     .height(48.dp)
                             ) {
-                                Icon(Icons.Default.CalendarToday, null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Calendar Alert (-3d)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Icon(Icons.Default.CalendarToday, null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Add Reminder",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
 
                             // Apply Button
@@ -2030,12 +2309,19 @@ fun ScrapedJobCard(
                                 shape = CircleShape,
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                                 modifier = Modifier
-                                    .weight(1f)
+                                    .weight(1.0f)
+                                    .bounceClick()
                                     .height(48.dp)
                             ) {
-                                Icon(Icons.Default.Launch, null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Apply & Log", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Icon(Icons.Default.Launch, null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Apply & Log",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                     }
@@ -2766,5 +3052,189 @@ private fun shareArchiveFile(context: Context, file: java.io.File) {
         context.startActivity(Intent.createChooser(intent, "Share Archived File:"))
     } catch (e: Exception) {
         Toast.makeText(context, "Error sharing archive: ${e.message}", Toast.LENGTH_SHORT).show()
+    }
+}
+
+@Composable
+fun Modifier.bounceClick(interactionSource: MutableInteractionSource = remember { MutableInteractionSource() }): Modifier {
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.94f else 1.0f,
+        animationSpec = spring(
+            dampingRatio = 0.55f,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "BounceClickScale"
+    )
+    return this.graphicsLayer {
+        scaleX = scale
+        scaleY = scale
+    }
+}
+
+@Composable
+fun ShimmerJobPlaceholder() {
+    val transition = rememberInfiniteTransition(label = "Shimmer")
+    val translateAnim = transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1000f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "ShimmerTranslate"
+    )
+    
+    val shimmerColors = listOf(
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+    )
+    
+    val brush = Brush.linearGradient(
+        colors = shimmerColors,
+        start = Offset(10f, 10f),
+        end = Offset(translateAnim.value, translateAnim.value)
+    )
+    
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), RoundedCornerShape(24.dp))
+            .padding(20.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxWidth(0.6f).height(20.dp).background(brush, RoundedCornerShape(4.dp)))
+        Spacer(modifier = Modifier.height(10.dp))
+        Box(modifier = Modifier.fillMaxWidth(0.4f).height(14.dp).background(brush, RoundedCornerShape(4.dp)))
+        Spacer(modifier = Modifier.height(16.dp))
+        Box(modifier = Modifier.fillMaxWidth().height(48.dp).background(brush, RoundedCornerShape(8.dp)))
+    }
+}
+
+data class ConfettiParticle(
+    var x: Float,
+    var y: Float,
+    val color: Color,
+    var vx: Float,
+    var vy: Float,
+    val size: Float,
+    var alpha: Float,
+    var rotation: Float,
+    val rotationSpeed: Float
+)
+
+class ParticleSystem {
+    var particles = mutableListOf<ConfettiParticle>()
+    
+    fun init(width: Float, height: Float) {
+        val colors = listOf(
+            Color(0xFFFF1744), // Pink
+            Color(0xFF00E676), // Green
+            Color(0xFF2979FF), // Blue
+            Color(0xFFFFEA00), // Yellow
+            Color(0xFFFF9100), // Orange
+            Color(0xFFD500F9)  // Purple
+        )
+        particles.clear()
+        for (i in 0 until 120) {
+            val isLeft = kotlin.random.Random.nextBoolean()
+            val startX = if (isLeft) 0f else width
+            val startY = height * 0.8f
+            
+            val angle = if (isLeft) {
+                kotlin.random.Random.nextFloat() * -60f - 15f
+            } else {
+                kotlin.random.Random.nextFloat() * -60f - 105f
+            }
+            val angleRad = Math.toRadians(angle.toDouble())
+            val speed = kotlin.random.Random.nextFloat() * 15f + 12f
+            
+            particles.add(
+                ConfettiParticle(
+                    x = startX,
+                    y = startY,
+                    color = colors.random(),
+                    vx = (Math.cos(angleRad) * speed).toFloat(),
+                    vy = (Math.sin(angleRad) * speed).toFloat(),
+                    size = kotlin.random.Random.nextFloat() * 14f + 8f,
+                    alpha = 1.0f,
+                    rotation = kotlin.random.Random.nextFloat() * 360f,
+                    rotationSpeed = kotlin.random.Random.nextFloat() * 8f - 4f
+                )
+            )
+        }
+    }
+    
+    fun update() {
+        val gravity = 0.4f
+        val iterator = particles.iterator()
+        while (iterator.hasNext()) {
+            val p = iterator.next()
+            p.x += p.vx
+            p.y += p.vy
+            p.vy += gravity
+            p.vx *= 0.98f
+            p.vy *= 0.98f
+            p.rotation += p.rotationSpeed
+            p.alpha -= 0.015f
+            if (p.alpha <= 0f) {
+                iterator.remove()
+            }
+        }
+    }
+}
+
+@Composable
+fun ConfettiEffect(
+    trigger: Boolean,
+    onFinished: () -> Unit
+) {
+    if (!trigger) return
+    
+    val particleSystem = remember { ParticleSystem() }
+    var running by remember { mutableStateOf(true) }
+    
+    LaunchedEffect(trigger) {
+        running = true
+    }
+    
+    LaunchedEffect(running) {
+        if (running) {
+            val startTime = System.currentTimeMillis()
+            while (particleSystem.particles.isNotEmpty() || System.currentTimeMillis() - startTime < 1200) {
+                particleSystem.update()
+                kotlinx.coroutines.delay(16)
+            }
+            running = false
+            onFinished()
+        }
+    }
+    
+    if (running) {
+        Canvas(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            val w = size.width
+            val h = size.height
+            
+            if (particleSystem.particles.isEmpty()) {
+                particleSystem.init(w, h)
+            }
+            
+            particleSystem.particles.forEach { p ->
+                withTransform({
+                    translate(p.x, p.y)
+                    rotate(p.rotation, pivot = Offset(p.size / 2, p.size / 2))
+                }) {
+                    drawRect(
+                        color = p.color.copy(alpha = p.alpha),
+                        size = androidx.compose.ui.geometry.Size(p.size, p.size)
+                    )
+                }
+            }
+        }
     }
 }
