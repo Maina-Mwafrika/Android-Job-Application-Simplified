@@ -30,7 +30,12 @@ data class ScrapedJob(
     val chatHistoryJson: String? = null,
     val matchScore: Int? = null,
     val matchFeedback: String? = null,
-    val industry: String = "Other / General"
+    val industry: String = "Other / General",
+    // NEW FIELD: true when this listing's data (and especially its `url`) was AI-generated or
+    // heuristically guessed rather than confirmed real -- e.g. the source site couldn't be reached,
+    // or the apply link failed a reachability check. The UI should badge these clearly so users
+    // never mistake a fabricated posting for a verified one.
+    val isSimulated: Boolean = false
 )
 
 @Entity(

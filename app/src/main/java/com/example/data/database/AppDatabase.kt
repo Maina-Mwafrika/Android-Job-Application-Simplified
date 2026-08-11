@@ -10,7 +10,11 @@ import com.example.data.entity.UserCv
 
 @Database(
     entities = [UserCv::class, ScrapedJob::class, AppliedJobLog::class],
-    version = 4,
+    // MODIFIED: version bumped 4 -> 5 because ScrapedJob gained the new `isSimulated` column.
+    // fallbackToDestructiveMigration() below means existing local rows are wiped on upgrade
+    // rather than migrated -- fine for this app's current stage, but note it if you ship an
+    // update to real users and want to preserve their scraped listings / applied logs.
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

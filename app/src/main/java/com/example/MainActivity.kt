@@ -1192,6 +1192,21 @@ fun JobScraperScreen(viewModel: JobViewModel, onTriggerConfetti: () -> Unit) {
         list
     }
 
+    // MODIFIED: per-industry job counts, recomputed whenever the underlying job list changes.
+    // Used to badge each industry chip (e.g. "Technology & IT (7)") and to decide whether the
+    // header count below should reflect the full list or the filtered one.
+    val industryCounts = remember(scrapedJobs) {
+        scrapedJobs.groupingBy { getJobIndustry(it) }.eachCount()
+    }
+
+    // MODIFIED: previously only searchQuery being non-empty switched the header into "filtered"
+    // mode, so selecting an industry (or a work-mode chip) alone left the header showing the
+    // unfiltered total even though the list below was already correctly filtered. Now any active
+    // filter -- search text, industry, or work mode -- switches the header to the filtered count.
+    val hasActiveFilters = searchQuery.isNotBlank() ||
+        selectedIndustry != "All Industries" ||
+        isRemoteChecked || isHybridChecked || isPhysicalChecked
+
     // Single LazyColumn makes the entire homepage scrollable smoothly
     LazyColumn(
         modifier = Modifier
@@ -1604,10 +1619,13 @@ fun JobScraperScreen(viewModel: JobViewModel, onTriggerConfetti: () -> Unit) {
                 ) {
                     items(industriesList) { ind ->
                         val isSel = selectedIndustry == ind
+                        // MODIFIED: show a live count on every chip (including "All Industries")
+                        // so it's clear how many jobs each filter option will actually surface.
+                        val count = if (ind == "All Industries") scrapedJobs.size else (industryCounts[ind] ?: 0)
                         FilterChip(
                             selected = isSel,
                             onClick = { selectedIndustry = ind },
-                            label = { Text(ind, fontSize = 11.sp) },
+                            label = { Text("$ind ($count)", fontSize = 11.sp) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                                 selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -1626,7 +1644,10 @@ fun JobScraperScreen(viewModel: JobViewModel, onTriggerConfetti: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = if (searchQuery.isEmpty()) {
+                    // MODIFIED: was `if (searchQuery.isEmpty())`, which meant selecting only an
+                    // industry or work-mode filter left this showing the unfiltered total. Now
+                    // uses hasActiveFilters so the header always matches what's actually listed.
+                    text = if (!hasActiveFilters) {
                         "Available Openings (${scrapedJobs.size})"
                     } else {
                         "Matches (${filteredJobs.size} of ${scrapedJobs.size})"
@@ -1812,6 +1833,34 @@ fun ScrapedJobCard(
                                     fontWeight = FontWeight.Bold,
                                     color = badgeColor
                                 )
+                            }
+                        }
+
+                        // NEW: "Unverified link" badge -- shown whenever this listing's data (and
+                        // especially its apply URL) was AI-generated/heuristically guessed rather
+                        // than confirmed real, or its URL failed a reachability check.
+                        if (job.isSimulated) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFFFFF3E0))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.WarningAmber,
+                                        contentDescription = null,
+                                        tint = Color(0xFFE65100),
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text(
+                                        text = "Unverified link",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFE65100)
+                                    )
+                                }
                             }
                         }
                     }
@@ -2316,7 +2365,10 @@ fun ScrapedJobCard(
                                 Icon(Icons.Default.Launch, null, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "Apply & Log",
+                                    // MODIFIED: label reflects that a simulated job will open a
+                                    // search instead of a guaranteed-real apply link (see
+                                    // JobViewModel.applyForJob for the matching logic change).
+                                    text = if (job.isSimulated) "Search & Log" else "Apply & Log",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,

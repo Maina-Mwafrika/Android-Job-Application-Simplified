@@ -5,6 +5,7 @@ import com.example.data.database.AppliedLogDao
 import com.example.data.database.CvDao
 import com.example.data.database.JobDao
 import com.example.data.api.GeminiClient
+import com.example.data.api.JobBoardApiClient
 import com.example.data.entity.AppliedJobLog
 import com.example.data.entity.ScrapedJob
 import com.example.data.entity.UserCv
@@ -66,19 +67,52 @@ class JobRepository(
     }
 
     /**
-     * Downloads raw web page content, extracts jobs using Gemini, and returns them.
-     */
-    /**
-     * Downloads raw web page content, extracts jobs using BOTH intuitive local code and Gemini AI, and returns them.
-     * Works seamlessly even without AI credits.
+     * Downloads raw web page content, extracts jobs using local heuristics + Gemini AI, and returns them.
+     *
+     * MODIFIED pipeline order (most-trustworthy source first):
+     *   0. Known ATS public API (Greenhouse / Lever) -- real, canonical apply links, no scraping at all.
+     *   1. schema.org JobPosting JSON-LD embedded in the page -- also a real, site-published link.
+     *   2. Local regex/heuristic scraping of the fetched HTML.
+     *   3. Gemini AI extraction (or, if the page couldn't be fetched at all, Gemini *simulation* --
+     *      now explicitly flagged with isSimulated = true instead of being presented as real).
+     *   4. Every job that didn't come from step 0/1 gets its apply URL checked for reachability;
+     *      anything that fails is also flagged isSimulated = true rather than silently shown as real.
      */
     suspend fun scrapeJobsFromUrl(url: String, targetTitle: String = ""): List<ScrapedJob> {
+        // --- STEP 0: NEW -- known job-board public API shortcut ---
+        // If this is a Greenhouse or Lever careers URL, skip scraping/AI entirely and hit their
+        // public JSON API directly. This is the most reliable path in the whole app for "real links".
+        JobBoardApiClient.detectBoard(url)?.let { board ->
+            try {
+                val apiJobs = when (board) {
+                    is JobBoardApiClient.BoardMatch.Greenhouse -> JobBoardApiClient.fetchGreenhouseJobs(board.token)
+                    is JobBoardApiClient.BoardMatch.Lever -> JobBoardApiClient.fetchLeverJobs(board.token)
+                }
+                if (apiJobs.isNotEmpty()) {
+                    val filtered = filterByTargetTitle(apiJobs, targetTitle)
+                    filtered.forEach { jobDao.insertScrapedJob(it) }
+                    return filtered
+                }
+                Log.w(TAG, "Detected ${board::class.simpleName} board but API returned no jobs; falling back to generic scraping.")
+            } catch (e: Exception) {
+                Log.w(TAG, "Job board API path failed (${e.message}); falling back to generic scraping.")
+            }
+        }
+
         var pageText = ""
+        var jsonLdBlocks: List<String> = emptyList()
         try {
-            pageText = GeminiClient.fetchUrlContent(url)
+            val fetchResult = GeminiClient.fetchPage(url)
+            pageText = fetchResult.text
+            jsonLdBlocks = fetchResult.jsonLdBlocks
         } catch (e: Exception) {
             pageText = "Error: ${e.message}"
         }
+
+        // --- STEP 1: NEW -- schema.org JobPosting structured data ---
+        // This comes straight from the page's own markup (most sites publish it for Google for
+        // Jobs / SEO), so its URLs are real and it is never marked simulated.
+        val jsonLdJobs = parseJsonLdJobPostings(jsonLdBlocks, url)
 
         val isBlockedOrFailed = pageText.startsWith("HTTP error:") || 
                                  pageText.startsWith("Error:") || 
@@ -86,10 +120,10 @@ class JobRepository(
                                  pageText.contains("security check") ||
                                  pageText.trim().length < 200
 
-        // 1. Run local "intuitive code" heuristic scraping first
+        // --- STEP 2: local "intuitive code" heuristic scraping ---
         val localJobs = heuristicScraping(pageText, url, isBlockedOrFailed, targetTitle)
 
-        // 2. Try Gemini AI scraping if available
+        // --- STEP 3: Gemini AI scraping (or simulation, if the page was unreachable) ---
         val aiJobs = mutableListOf<ScrapedJob>()
         val prompt = if (isBlockedOrFailed) {
             // Intelligent simulation fallback when job boards block raw bot HTTP crawlers
@@ -151,7 +185,9 @@ class JobRepository(
         try {
             val response = GeminiClient.generateContent(prompt, systemInstruction)
             if (!response.startsWith("Error")) {
-                aiJobs.addAll(parseJobsFromJson(response, url))
+                // MODIFIED: pass through whether this came from the "simulate from scratch" branch
+                // so those jobs get isSimulated = true instead of looking identical to a real scrape.
+                aiJobs.addAll(parseJobsFromJson(response, url, simulated = isBlockedOrFailed))
             } else {
                 Log.w(TAG, "Gemini failed with error message, proceeding with local scraper results.")
             }
@@ -159,42 +195,170 @@ class JobRepository(
             Log.e(TAG, "Gemini call failed with exception: ${e.message}, falling back gracefully to intuitive code scraper.")
         }
 
-        // 3. Merge and deduplicate results
+        // --- Merge and deduplicate results (structured-data jobs first) ---
         val finalJobs = mutableListOf<ScrapedJob>()
-        if (aiJobs.isNotEmpty()) {
-            finalJobs.addAll(aiJobs)
-            // Add any local jobs that were not discovered by the AI, match by URL or title
-            localJobs.forEach { localJob ->
-                val isDuplicate = finalJobs.any { 
-                    it.url == localJob.url || 
-                    (it.title.equals(localJob.title, ignoreCase = true) && it.company.equals(localJob.company, ignoreCase = true))
-                }
-                if (!isDuplicate) {
-                    finalJobs.add(localJob)
-                }
+        finalJobs.addAll(jsonLdJobs)
+
+        fun isDuplicateOf(candidate: ScrapedJob): Boolean =
+            finalJobs.any {
+                it.url == candidate.url ||
+                    (it.title.equals(candidate.title, ignoreCase = true) && it.company.equals(candidate.company, ignoreCase = true))
             }
-        } else {
-            // No AI credits or AI failed: use our pristine intuitive code results completely!
+
+        if (aiJobs.isNotEmpty()) {
+            aiJobs.forEach { if (!isDuplicateOf(it)) finalJobs.add(it) }
+            localJobs.forEach { if (!isDuplicateOf(it)) finalJobs.add(it) }
+        } else if (jsonLdJobs.isEmpty()) {
+            // No AI credits or AI failed, and no structured data found: fall back to the intuitive
+            // code results (these are already isSimulated = true when the page was unreachable,
+            // see heuristicScraping below).
             finalJobs.addAll(localJobs)
         }
 
-        // Apply strict client-side filtering if targetTitle is specified to ensure 100% relevance
-        if (targetTitle.isNotBlank()) {
-            val queryWords = targetTitle.lowercase().split("\\s+".toRegex()).filter { it.length >= 3 }
-            if (queryWords.isNotEmpty()) {
-                finalJobs.retainAll { job ->
-                    val combinedText = (job.title + " " + job.description).lowercase()
-                    queryWords.any { word -> combinedText.contains(word) }
+        val filteredByTitle = filterByTargetTitle(finalJobs, targetTitle)
+
+        // --- STEP 4: NEW -- verify every non-structured-data URL before we present it as real ---
+        // jsonLdJobs are already trustworthy (came from the page's own markup) but we still check
+        // them too, since even published JobPosting data can go stale.
+        val verifiedJobs = filteredByTitle.map { job ->
+            if (job.isSimulated) {
+                job
+            } else {
+                val reachable = try {
+                    GeminiClient.isUrlReachable(job.url)
+                } catch (e: Exception) {
+                    false
                 }
+                if (reachable) job else job.copy(isSimulated = true)
             }
         }
 
         // Insert into database so user can view them immediately
-        finalJobs.forEach { job ->
+        verifiedJobs.forEach { job ->
             jobDao.insertScrapedJob(job)
         }
 
-        return finalJobs
+        return verifiedJobs
+    }
+
+    private fun filterByTargetTitle(jobs: List<ScrapedJob>, targetTitle: String): List<ScrapedJob> {
+        if (targetTitle.isBlank()) return jobs
+        val queryWords = targetTitle.lowercase().split("\\s+".toRegex()).filter { it.length >= 3 }
+        if (queryWords.isEmpty()) return jobs
+        return jobs.filter { job ->
+            val combinedText = (job.title + " " + job.description).lowercase()
+            queryWords.any { word -> combinedText.contains(word) }
+        }
+    }
+
+    /**
+     * NEW: Parses schema.org JobPosting objects out of <script type="application/ld+json"> blocks.
+     * This is the most trustworthy source of job data in the whole pipeline because it comes
+     * directly from the site's own markup (typically published for Google for Jobs / SEO), and
+     * that includes the site's own canonical apply URL -- nothing here is guessed or generated.
+     */
+    private fun parseJsonLdJobPostings(blocks: List<String>, sourceUrl: String): List<ScrapedJob> {
+        val results = mutableListOf<ScrapedJob>()
+
+        fun extractFromObject(obj: JSONObject) {
+            val type = obj.opt("@type")
+            val isJobPosting = when (type) {
+                is String -> type.equals("JobPosting", ignoreCase = true)
+                is JSONArray -> (0 until type.length()).any { (type.optString(it, "")).equals("JobPosting", ignoreCase = true) }
+                else -> false
+            }
+            if (!isJobPosting) return
+
+            val title = obj.optString("title", "").trim()
+            if (title.isEmpty()) return
+
+            val company = when (val org = obj.opt("hiringOrganization")) {
+                is JSONObject -> org.optString("name", "").trim()
+                is String -> org.trim()
+                else -> ""
+            }.ifEmpty { "Confidential" }
+
+            val location = try {
+                val jobLocation = obj.opt("jobLocation")
+                val locObj = when (jobLocation) {
+                    is JSONArray -> if (jobLocation.length() > 0) jobLocation.optJSONObject(0) else null
+                    is JSONObject -> jobLocation
+                    else -> null
+                }
+                val address = locObj?.optJSONObject("address")
+                listOfNotNull(
+                    address?.optString("addressLocality")?.takeIf { it.isNotBlank() },
+                    address?.optString("addressRegion")?.takeIf { it.isNotBlank() },
+                    address?.optString("addressCountry")?.takeIf { it.isNotBlank() }
+                ).joinToString(", ").ifEmpty {
+                    val locationType = obj.optString("jobLocationType", "")
+                    if (locationType.contains("TELECOMMUTE", ignoreCase = true)) "Remote" else "Not Specified"
+                }
+            } catch (e: Exception) {
+                "Not Specified"
+            }
+
+            val description = obj.optString("description", "No details provided.")
+                .replace(Regex("<[^>]*>"), " ")
+                .replace(Regex("\\s+"), " ")
+                .trim()
+                .ifEmpty { "No details provided." }
+
+            val deadline = obj.optString("validThrough", "").let {
+                if (it.length >= 10) it.substring(0, 10) else "2026-08-31"
+            }
+
+            val applyUrl = obj.optString("url", "").ifBlank { sourceUrl }
+            val resolvedUrl = if (applyUrl.startsWith("http://") || applyUrl.startsWith("https://")) {
+                applyUrl
+            } else {
+                resolveRelativeUrl(sourceUrl, applyUrl)
+            }
+
+            val industry = heuristicDetermineIndustry(title, description)
+
+            results.add(
+                ScrapedJob(
+                    title = title,
+                    company = company,
+                    location = location,
+                    description = description,
+                    deadline = deadline,
+                    url = resolvedUrl,
+                    industry = industry,
+                    isSimulated = false
+                )
+            )
+        }
+
+        blocks.forEach { raw ->
+            try {
+                val trimmed = raw.trim()
+                when {
+                    trimmed.startsWith("[") -> {
+                        val arr = JSONArray(trimmed)
+                        for (i in 0 until arr.length()) {
+                            arr.optJSONObject(i)?.let { extractFromObject(it) }
+                        }
+                    }
+                    trimmed.startsWith("{") -> {
+                        val obj = JSONObject(trimmed)
+                        val graph = obj.optJSONArray("@graph") // some sites wrap postings in @graph
+                        if (graph != null) {
+                            for (i in 0 until graph.length()) {
+                                graph.optJSONObject(i)?.let { extractFromObject(it) }
+                            }
+                        } else {
+                            extractFromObject(obj)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "Skipping unparsable JSON-LD block: ${e.message}")
+            }
+        }
+
+        return results
     }
 
     /**
@@ -306,7 +470,11 @@ class JobRepository(
                         description = desc,
                         deadline = deadlineDate,
                         url = deepUrl,
-                        industry = industry
+                        industry = industry,
+                        // MODIFIED: this whole branch is a made-up fallback (title, company, and
+                        // especially the URL are all fabricated locally) -- it must never be shown
+                        // to the user as if it were a verified real posting.
+                        isSimulated = true
                     )
                 )
             }
@@ -394,6 +562,9 @@ class JobRepository(
                         deadline = deadline,
                         url = resolvedUrl,
                         industry = industry
+                        // isSimulated left at default (false): this URL was actually found in the
+                        // page's own anchor tags, not guessed -- but it still goes through the
+                        // reachability check in scrapeJobsFromUrl() before being trusted fully.
                     )
                 )
                 seenUrls.add(jobUrl)
@@ -436,7 +607,11 @@ class JobRepository(
                                 description = description,
                                 deadline = "2026-08-18",
                                 url = sourceUrl,
-                                industry = industry
+                                industry = industry,
+                                // MODIFIED: we don't have a real per-job link here at all -- it just
+                                // falls back to the source listing page URL -- so mark it simulated
+                                // rather than implying it's a direct apply link.
+                                isSimulated = true
                             )
                         )
                         if (jobs.size >= 12) break
@@ -463,7 +638,9 @@ class JobRepository(
                         description = desc,
                         deadline = "2026-08-18",
                         url = sourceUrl,
-                        industry = ind
+                        industry = ind,
+                        // MODIFIED: entirely made-up placeholder content.
+                        isSimulated = true
                     )
                 )
             }
@@ -704,7 +881,7 @@ class JobRepository(
         return Pair(customizedCv, coverLetter)
     }
 
-    private fun parseJobsFromJson(jsonString: String, sourceUrl: String): List<ScrapedJob> {
+    private fun parseJobsFromJson(jsonString: String, sourceUrl: String, simulated: Boolean = false): List<ScrapedJob> {
         val list = mutableListOf<ScrapedJob>()
         try {
             var cleanJson = jsonString.trim()
@@ -735,7 +912,7 @@ class JobRepository(
                 if (objStart != -1 && objEnd != -1 && objEnd > objStart) {
                     val singleObjStr = cleanJson.substring(objStart, objEnd + 1)
                     val obj = JSONObject(singleObjStr)
-                    val job = parseJobObject(obj, sourceUrl)
+                    val job = parseJobObject(obj, sourceUrl, simulated)
                     if (isValidJobTitle(job.title)) {
                         list.add(job)
                     }
@@ -747,7 +924,7 @@ class JobRepository(
             val array = JSONArray(cleanJson)
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
-                val job = parseJobObject(obj, sourceUrl)
+                val job = parseJobObject(obj, sourceUrl, simulated)
                 if (isValidJobTitle(job.title)) {
                     list.add(job)
                 } else {
@@ -761,7 +938,7 @@ class JobRepository(
         return list
     }
 
-    private fun parseJobObject(obj: JSONObject, defaultUrl: String): ScrapedJob {
+    private fun parseJobObject(obj: JSONObject, defaultUrl: String, simulated: Boolean = false): ScrapedJob {
         val title = obj.optString("title", "Job Opportunity").trim()
         val company = obj.optString("company", "Confidential").trim()
         val location = obj.optString("location", "Not Specified").trim()
@@ -786,7 +963,10 @@ class JobRepository(
             description = description,
             deadline = deadline,
             url = url,
-            industry = industry
+            industry = industry,
+            // MODIFIED: threaded through from the caller so jobs born from the "simulate from
+            // scratch" prompt branch are honestly labeled instead of looking like a real scrape.
+            isSimulated = simulated
         )
     }
 

@@ -395,6 +395,12 @@ class JobViewModel(private val repository: JobRepository) : ViewModel() {
 
     /**
      * Applies for a job, logs the application to avoid duplicates, and launches the apply URL/files.
+     *
+     * MODIFIED: for jobs flagged isSimulated (fabricated/heuristic data, or a URL that failed
+     * verification -- see JobRepository.scrapeJobsFromUrl), we no longer trust job.url at all,
+     * even if it happens to look like a valid http(s) link. We always fall back to a Google search
+     * for the role + company instead, and tell the user why, so nobody is sent to a dead or
+     * fabricated apply link believing it's real.
      */
     fun applyForJob(context: Context, job: ScrapedJob) {
         viewModelScope.launch {
@@ -421,11 +427,20 @@ class JobViewModel(private val repository: JobRepository) : ViewModel() {
                 )
                 repository.insertAppliedLog(log)
 
-                Toast.makeText(context, "Application Logged for ${job.title} at ${job.company}!", Toast.LENGTH_SHORT).show()
+                if (job.isSimulated) {
+                    Toast.makeText(
+                        context,
+                        "Logged '${job.title}' at ${job.company}. This listing's link is unverified, so we're opening a search instead of the stored URL.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else {
+                    Toast.makeText(context, "Application Logged for ${job.title} at ${job.company}!", Toast.LENGTH_SHORT).show()
+                }
 
-                // Direct launch of specific job application URL
+                // MODIFIED: direct launch of the specific job application URL -- but only if this
+                // job's link was never fabricated/unverified. Simulated jobs always go to search.
                 val rawUrl = job.url.trim()
-                val targetUrl = if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) {
+                val targetUrl = if (!job.isSimulated && (rawUrl.startsWith("http://") || rawUrl.startsWith("https://"))) {
                     rawUrl
                 } else {
                     val searchQuery = Uri.encode("${job.title} ${job.company}")
