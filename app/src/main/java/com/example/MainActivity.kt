@@ -1090,19 +1090,6 @@ fun JobScraperScreen(viewModel: JobViewModel, onTriggerConfetti: () -> Unit) {
     // Target Job Title input for targeted scraping
     var scrapeTargetTitle by remember { mutableStateOf("") }
 
-    // Job Board URL Pre-fill Selection States
-    var expandedBoardDropdown by remember { mutableStateOf(false) }
-    val boardsList = remember(scrapeTargetTitle) {
-        val query = if (scrapeTargetTitle.isNotBlank()) scrapeTargetTitle.trim() else "android developer"
-        listOf(
-            "LinkedIn" to "https://www.linkedin.com/jobs/search?keywords=${android.net.Uri.encode(query)}",
-            "Indeed" to "https://www.indeed.com/jobs?q=${android.net.Uri.encode(query)}",
-            "ZipRecruiter" to "https://www.ziprecruiter.com/jobs-search?search=${android.net.Uri.encode(query)}",
-            "Fuzu (Nairobi)" to "https://www.fuzu.com/kenya/jobs?q=${android.net.Uri.encode(query)}",
-            "BrighterMonday (Nairobi)" to "https://www.brightermonday.co.ke/jobs?q=${android.net.Uri.encode(query)}"
-        )
-    }
-
     // Observe State changes for notifications
     LaunchedEffect(scrapingState) {
         if (scrapingState is ScrapingState.Success) {
@@ -1237,104 +1224,6 @@ fun JobScraperScreen(viewModel: JobViewModel, onTriggerConfetti: () -> Unit) {
                     singleLine = true,
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(20.dp)) }
                 )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                // Board selection dropdown and horizontal suggestion chips
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Auto-fill Board:",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(end = 6.dp)
-                    )
-                    Box {
-                        val currentBoardName = remember(jobUrlInput, boardsList) {
-                            boardsList.find { it.second == jobUrlInput }?.first ?: "Select Board"
-                        }
-
-                        OutlinedButton(
-                            onClick = { expandedBoardDropdown = true },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = Color.White,
-                                contentColor = Color.Black
-                            ),
-                            border = BorderStroke(1.dp, Color(0xFFCCCCCC)),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                            modifier = Modifier.height(32.dp)
-                        ) {
-                            Text(currentBoardName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Icon(Icons.Default.ArrowDropDown, null, modifier = Modifier.size(16.dp), tint = Color.Black)
-                        }
-                        DropdownMenu(
-                            expanded = expandedBoardDropdown,
-                            onDismissRequest = { expandedBoardDropdown = false },
-                            modifier = Modifier
-                                .background(Color.White)
-                                .border(
-                                    width = 1.dp,
-                                    color = Color(0xFFDDDDDD),
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                        ) {
-                            boardsList.forEach { (name, url) ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            text = name,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.Black
-                                        )
-                                    },
-                                    colors = MenuDefaults.itemColors(
-                                        textColor = Color.Black,
-                                        leadingIconColor = Color(0xFF1B4D89)
-                                    ),
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Default.Business,
-                                            contentDescription = null,
-                                            tint = Color(0xFF1B4D89),
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    },
-                                    onClick = {
-                                        jobUrlInput = url
-                                        expandedBoardDropdown = false
-                                        Toast.makeText(context, "$name URL pre-filled!", Toast.LENGTH_SHORT).show()
-                                    }
-                                )
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(6.dp))
-                    // Scrollable selection row
-                    androidx.compose.foundation.lazy.LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        items(boardsList) { (name, url) ->
-                            SuggestionChip(
-                                onClick = {
-                                    jobUrlInput = url
-                                    Toast.makeText(context, "$name URL pre-filled!", Toast.LENGTH_SHORT).show()
-                                },
-                                label = { Text(name, fontSize = 9.sp) },
-                                shape = RoundedCornerShape(16.dp),
-                                modifier = Modifier.height(26.dp)
-                            )
-                        }
-                    }
-                }
 
                 Spacer(modifier = Modifier.height(4.dp))
 

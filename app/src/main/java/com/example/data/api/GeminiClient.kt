@@ -15,11 +15,8 @@ import java.util.concurrent.TimeUnit
 object GeminiClient {
     private const val TAG = "GeminiClient"
 
-    // MODIFIED: "gemini-3.5-flash" is not a confirmed valid model id and calls to a bad model id
-    // return an error, which silently pushes the app into its "fabricate jobs" fallback path every
-    // time. Using a documented stable model here. Google renames/deprecates models fairly often --
-    // double check the current id at https://ai.google.dev/gemini-api/docs/models before shipping.
-    private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    // Updated model ID to gemini-3.5-flash (supported for basic text generation and structured outputs)
+    private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
 
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)

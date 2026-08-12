@@ -427,20 +427,10 @@ class JobViewModel(private val repository: JobRepository) : ViewModel() {
                 )
                 repository.insertAppliedLog(log)
 
-                if (job.isSimulated) {
-                    Toast.makeText(
-                        context,
-                        "Logged '${job.title}' at ${job.company}. This listing's link is unverified, so we're opening a search instead of the stored URL.",
-                        Toast.LENGTH_LONG
-                    ).show()
-                } else {
-                    Toast.makeText(context, "Application Logged for ${job.title} at ${job.company}!", Toast.LENGTH_SHORT).show()
-                }
+                Toast.makeText(context, "Application Logged for ${job.title} at ${job.company}!", Toast.LENGTH_SHORT).show()
 
-                // MODIFIED: direct launch of the specific job application URL -- but only if this
-                // job's link was never fabricated/unverified. Simulated jobs always go to search.
                 val rawUrl = job.url.trim()
-                val targetUrl = if (!job.isSimulated && (rawUrl.startsWith("http://") || rawUrl.startsWith("https://"))) {
+                val targetUrl = if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) {
                     rawUrl
                 } else {
                     val searchQuery = Uri.encode("${job.title} ${job.company}")

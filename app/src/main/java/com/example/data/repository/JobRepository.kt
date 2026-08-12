@@ -5,7 +5,6 @@ import com.example.data.database.AppliedLogDao
 import com.example.data.database.CvDao
 import com.example.data.database.JobDao
 import com.example.data.api.GeminiClient
-import com.example.data.api.JobBoardApiClient
 import com.example.data.entity.AppliedJobLog
 import com.example.data.entity.ScrapedJob
 import com.example.data.entity.UserCv
@@ -79,26 +78,6 @@ class JobRepository(
      *      anything that fails is also flagged isSimulated = true rather than silently shown as real.
      */
     suspend fun scrapeJobsFromUrl(url: String, targetTitle: String = ""): List<ScrapedJob> {
-        // --- STEP 0: NEW -- known job-board public API shortcut ---
-        // If this is a Greenhouse or Lever careers URL, skip scraping/AI entirely and hit their
-        // public JSON API directly. This is the most reliable path in the whole app for "real links".
-        JobBoardApiClient.detectBoard(url)?.let { board ->
-            try {
-                val apiJobs = when (board) {
-                    is JobBoardApiClient.BoardMatch.Greenhouse -> JobBoardApiClient.fetchGreenhouseJobs(board.token)
-                    is JobBoardApiClient.BoardMatch.Lever -> JobBoardApiClient.fetchLeverJobs(board.token)
-                }
-                if (apiJobs.isNotEmpty()) {
-                    val filtered = filterByTargetTitle(apiJobs, targetTitle)
-                    filtered.forEach { jobDao.insertScrapedJob(it) }
-                    return filtered
-                }
-                Log.w(TAG, "Detected ${board::class.simpleName} board but API returned no jobs; falling back to generic scraping.")
-            } catch (e: Exception) {
-                Log.w(TAG, "Job board API path failed (${e.message}); falling back to generic scraping.")
-            }
-        }
-
         var pageText = ""
         var jsonLdBlocks: List<String> = emptyList()
         try {
@@ -123,34 +102,10 @@ class JobRepository(
         // --- STEP 2: local "intuitive code" heuristic scraping ---
         val localJobs = heuristicScraping(pageText, url, isBlockedOrFailed, targetTitle)
 
-        // --- STEP 3: Gemini AI scraping (or simulation, if the page was unreachable) ---
+        // --- STEP 3: Gemini AI scraping (only if page content is present and not blocked) ---
         val aiJobs = mutableListOf<ScrapedJob>()
-        val prompt = if (isBlockedOrFailed) {
-            // Intelligent simulation fallback when job boards block raw bot HTTP crawlers
-            """
-                We are simulating a real-time web scrape of the job board at URL: "$url".
-                Since the source webpage blocked the direct automated crawler with anti-bot policies, please use your intelligence to generate a list of 5 highly realistic, active, and specific job openings that would be found matching this query or board.
-                
-                The current local date is: July 18, 2026.
-                
-                ${if (targetTitle.isNotBlank()) "CRITICAL REQUIREMENT: You MUST generate job openings that are specifically relevant to the target job title, role, or keyword query: \"$targetTitle\". Every single generated job opening must fit this role." else ""}
-                
-                CRITICAL INSTRUCTION: Generate ONLY legitimate, professional job titles. Under no circumstances should you generate utility or page navigation titles (such as "Forgot Password", "Show Password", "Log In", "Sign Up", "Search", "Privacy Policy", etc.).
-                
-                For each job opening, generate:
-                1. "title" (e.g., "${if (targetTitle.isNotBlank()) targetTitle else "Senior Android Developer"}", "Kotlin Software Engineer", "Product Designer", "IT Support Specialist", "Finance Analyst" depending on the URL and search terms)
-                2. "company" (e.g., "Safaricom", "Equity Bank", "M-KOPA", "Google", "Microsoft", "Netflix" etc., or local firms if Nairobi-based Fuzu or BrighterMonday URLs are requested)
-                3. "location" (e.g., "Remote", "Nairobi, Kenya", "San Francisco, CA" or "Hybrid" depending on the job board)
-                4. "description" (a comprehensive description with specific responsibilities, qualifications, and core tech stack)
-                5. "deadline" (calculate an exact upcoming application closing date between July 25, 2026 and August 30, 2026, formatted strictly as YYYY-MM-DD)
-                6. "url" (generate a highly realistic, specific deep application URL for this particular job that matches the source site domain: if source URL is Indeed generate "https://www.indeed.com/viewjob?jk=...", if ZipRecruiter generate "https://www.ziprecruiter.com/jobs/...", if Fuzu generate "https://www.fuzu.com/kenya/jobs/...", if BrighterMonday generate "https://www.brightermonday.co.ke/jobs/...", if LinkedIn generate "https://www.linkedin.com/jobs/view/...", or if a custom careers site generate a direct job link under that domain host. MUST NOT default all URLs to LinkedIn.)
-                7. "industry" (select the most accurate category from: "Technology & IT", "Finance & Banking", "Healthcare & Biotech", "Education & Academia", "Marketing & Sales", "Engineering & Construction", or "Other / General" based on the job role)
-                
-                Return ONLY a valid raw JSON array of these objects. Do not include any markdown backticks, explanations, or conversational filler.
-            """.trimIndent()
-        } else {
-            // Real scraping
-            """
+        if (!isBlockedOrFailed) {
+            val prompt = """
                 You are an advanced AI web scraper. Below is the text content extracted from a job search portal or listing page at URL: "$url".
                 Please inspect this text carefully, extract any and all available job openings, and format them as a valid JSON array.
                 
@@ -178,21 +133,19 @@ class JobRepository(
                 $pageText
                 ------------------
             """.trimIndent()
-        }
 
-        val systemInstruction = "You are a highly professional, precise data extraction and synthesis engine. You output perfectly formatted JSON matching the requested keys."
+            val systemInstruction = "You are a highly professional, precise data extraction engine. You output perfectly formatted JSON matching the requested keys."
 
-        try {
-            val response = GeminiClient.generateContent(prompt, systemInstruction)
-            if (!response.startsWith("Error")) {
-                // MODIFIED: pass through whether this came from the "simulate from scratch" branch
-                // so those jobs get isSimulated = true instead of looking identical to a real scrape.
-                aiJobs.addAll(parseJobsFromJson(response, url, simulated = isBlockedOrFailed))
-            } else {
-                Log.w(TAG, "Gemini failed with error message, proceeding with local scraper results.")
+            try {
+                val response = GeminiClient.generateContent(prompt, systemInstruction)
+                if (!response.startsWith("Error")) {
+                    aiJobs.addAll(parseJobsFromJson(response, url, simulated = false))
+                } else {
+                    Log.w(TAG, "Gemini failed with error message, proceeding with local scraper results.")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Gemini call failed with exception: ${e.message}, falling back gracefully to intuitive code scraper.")
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Gemini call failed with exception: ${e.message}, falling back gracefully to intuitive code scraper.")
         }
 
         // --- Merge and deduplicate results (structured-data jobs first) ---
@@ -217,19 +170,16 @@ class JobRepository(
 
         val filteredByTitle = filterByTargetTitle(finalJobs, targetTitle)
 
-        // --- STEP 4: NEW -- verify every non-structured-data URL before we present it as real ---
-        // jsonLdJobs are already trustworthy (came from the page's own markup) but we still check
-        // them too, since even published JobPosting data can go stale.
-        val verifiedJobs = filteredByTitle.map { job ->
-            if (job.isSimulated) {
-                job
+        // --- STEP 4: Filter out any fabricated, simulated, or unreachable job postings ---
+        val verifiedJobs = filteredByTitle.filter { job ->
+            if (job.isSimulated || job.url.isBlank() || (!job.url.startsWith("http://") && !job.url.startsWith("https://"))) {
+                false
             } else {
-                val reachable = try {
+                try {
                     GeminiClient.isUrlReachable(job.url)
                 } catch (e: Exception) {
                     false
                 }
-                if (reachable) job else job.copy(isSimulated = true)
             }
         }
 
@@ -369,116 +319,7 @@ class JobRepository(
         val seenUrls = mutableSetOf<String>()
 
         if (isBlocked || pageText.length < 200) {
-            // Intelligent local simulation of job boards for high-fidelity fallback when page is blocked
-            val searchKeyword = extractKeywordFromUrl(sourceUrl)
-            val baseDomainCompany = extractCompanyFromUrl(sourceUrl) ?: "Apex Global"
-            
-            val simulatedRoles = if (targetTitle.isNotBlank()) {
-                listOf(
-                    targetTitle to (extractCompanyFromUrl(sourceUrl) ?: "Safaricom PLC"),
-                    "Senior $targetTitle" to "M-KOPA Kenya",
-                    "Lead $targetTitle" to "Equity Bank Group",
-                    "Junior $targetTitle" to "Cellulant",
-                    "Technical $targetTitle Specialist" to "Andela"
-                )
-            } else {
-                when (searchKeyword.lowercase()) {
-                    "android", "kotlin", "compose" -> listOf(
-                        "Senior Android Engineer" to "Safaricom PLC",
-                        "Kotlin Developer" to "M-KOPA Kenya",
-                        "Mobile App Developer (Compose)" to "Equity Bank Group",
-                        "Junior Android Developer" to "Cellulant",
-                        "Android Tech Lead" to "SokoWatch (Wasoko)"
-                    )
-                    "software", "developer", "engineer" -> listOf(
-                        "Full Stack Software Engineer" to "Microsoft Africa Development Center",
-                        "Backend Systems Engineer" to "Kopo Kopo",
-                        "Frontend Web Specialist" to "Andela",
-                        "DevOps Engineer" to "Copias Kenya",
-                        "Junior Software Engineer" to "MyDawa"
-                    )
-                    "finance", "account", "banking" -> listOf(
-                        "Treasury Management Analyst" to "I&M Bank",
-                        "Senior Financial Accountant" to "NCBA Group",
-                        "Internal Auditor" to "Kenya Commercial Bank",
-                        "Risk & Compliance Officer" to "Equity Bank Group",
-                        "Investment Portfolio Associate" to "Britam"
-                    )
-                    "health", "medical" -> listOf(
-                        "Clinical Research Coordinator" to "KEMRI",
-                        "Digital Health Product Owner" to "Infectious Diseases Institute",
-                        "Telemedicine Specialist" to "MyDawa",
-                        "Health Informatics Analyst" to "Amref Health Africa",
-                        "Laboratory Services Manager" to "Pathcare Kenya"
-                    )
-                    "marketing", "sales" -> listOf(
-                        "Digital Marketing Manager" to "Jumia Group",
-                        "Sales Growth Specialist" to "M-KOPA Kenya",
-                        "Brand Communications Specialist" to "Safaricom",
-                        "SEO & Content Strategist" to "Ringier One Africa Media",
-                        "Corporate Account Representative" to "Copias Kenya"
-                    )
-                    else -> listOf(
-                        "Technical Support Specialist" to "Safaricom PLC",
-                        "Data Analyst" to "SokoWatch",
-                        "Operations Coordinator" to "Sendy Kenya",
-                        "Product Manager" to "Airtel Kenya",
-                        "IT Systems Administrator" to "Co-operative Bank"
-                    )
-                }
-            }
-
-            simulatedRoles.forEachIndexed { index, (title, company) ->
-                val desc = buildHeuristicDescription(title, company, "Nairobi, Kenya")
-                val industry = heuristicDetermineIndustry(title, desc)
-                val deadlineDate = "2026-08-${15 + index}"
-                val lowerSource = sourceUrl.lowercase()
-                val slugTitle = title.lowercase().replace("[^a-z0-9]+".toRegex(), "-").trim('-')
-                val deepUrl = when {
-                    lowerSource.contains("indeed") -> {
-                        "https://www.indeed.com/viewjob?jk=${slugTitle}${1000 + index}"
-                    }
-                    lowerSource.contains("ziprecruiter") -> {
-                        "https://www.ziprecruiter.com/jobs/$slugTitle-${1000 + index}"
-                    }
-                    lowerSource.contains("fuzu") -> {
-                        "https://www.fuzu.com/kenya/jobs/$slugTitle-${1000 + index}"
-                    }
-                    lowerSource.contains("brightermonday") -> {
-                        "https://www.brightermonday.co.ke/jobs/$slugTitle-${1000 + index}"
-                    }
-                    lowerSource.contains("linkedin") -> {
-                        "https://www.linkedin.com/jobs/view/${928400000 + index + (Math.random() * 10000).toInt()}"
-                    }
-                    lowerSource.startsWith("http") -> {
-                        try {
-                            val uri = android.net.Uri.parse(sourceUrl)
-                            val host = uri.host ?: "careers.site"
-                            "https://$host/jobs/$slugTitle-${1000 + index}"
-                        } catch (e: Exception) {
-                            "https://www.linkedin.com/jobs/view/${928400000 + index}"
-                        }
-                    }
-                    else -> "https://www.linkedin.com/jobs/view/${928400000 + index}"
-                }
-
-                jobs.add(
-                    ScrapedJob(
-                        title = title,
-                        company = company,
-                        location = "Hybrid (Nairobi, Kenya)",
-                        description = desc,
-                        deadline = deadlineDate,
-                        url = deepUrl,
-                        industry = industry,
-                        // MODIFIED: this whole branch is a made-up fallback (title, company, and
-                        // especially the URL are all fabricated locally) -- it must never be shown
-                        // to the user as if it were a verified real posting.
-                        isSimulated = true
-                    )
-                )
-            }
-            return jobs
+            return emptyList()
         }
 
         // Real page scraping from pageText using Regex
@@ -562,88 +403,12 @@ class JobRepository(
                         deadline = deadline,
                         url = resolvedUrl,
                         industry = industry
-                        // isSimulated left at default (false): this URL was actually found in the
-                        // page's own anchor tags, not guessed -- but it still goes through the
-                        // reachability check in scrapeJobsFromUrl() before being trusted fully.
                     )
                 )
                 seenUrls.add(jobUrl)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Heuristic link parsing error: ${e.message}")
-        }
-
-        // Pattern 2: Scan individual text lines for job-like phrases
-        if (jobs.isEmpty()) {
-            try {
-                val lines = pageText.split("\n")
-                for (i in lines.indices) {
-                    val line = lines[i].trim()
-                    if (line.length in 10..80 && isJobTitleLike(line)) {
-                        val title = line
-                        var company = "Hiring Partner"
-                        
-                        // Look at the adjacent line for company names
-                        if (i + 1 < lines.size) {
-                            val nextLine = lines[i + 1].trim()
-                            if (nextLine.isNotEmpty() && nextLine.length < 40 && !isJobTitleLike(nextLine)) {
-                                company = nextLine
-                            }
-                        }
-                        
-                        var location = "Remote"
-                        if (pageText.contains("Nairobi", ignoreCase = true)) {
-                            location = "Nairobi, Kenya"
-                        }
-                        
-                        val description = buildHeuristicDescription(title, company, location)
-                        val industry = heuristicDetermineIndustry(title, description)
-                        
-                        jobs.add(
-                            ScrapedJob(
-                                title = title,
-                                company = company,
-                                location = location,
-                                description = description,
-                                deadline = "2026-08-18",
-                                url = sourceUrl,
-                                industry = industry,
-                                // MODIFIED: we don't have a real per-job link here at all -- it just
-                                // falls back to the source listing page URL -- so mark it simulated
-                                // rather than implying it's a direct apply link.
-                                isSimulated = true
-                            )
-                        )
-                        if (jobs.size >= 12) break
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Heuristic line scanning error: ${e.message}")
-            }
-        }
-
-        // Ultimate fallback
-        if (jobs.isEmpty()) {
-            val fallbackTitles = listOf("Senior Android Engineer", "Backend Developer (Kotlin)", "Product Manager")
-            val fallbackCompanies = listOf("Apex Solutions", "Equity Group Labs", "Tech Innovators")
-            fallbackTitles.forEachIndexed { idx, t ->
-                val comp = fallbackCompanies[idx]
-                val desc = buildHeuristicDescription(t, comp, "Remote / Hybrid")
-                val ind = heuristicDetermineIndustry(t, desc)
-                jobs.add(
-                    ScrapedJob(
-                        title = t,
-                        company = comp,
-                        location = "Remote",
-                        description = desc,
-                        deadline = "2026-08-18",
-                        url = sourceUrl,
-                        industry = ind,
-                        // MODIFIED: entirely made-up placeholder content.
-                        isSimulated = true
-                    )
-                )
-            }
         }
 
         return jobs
